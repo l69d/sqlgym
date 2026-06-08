@@ -1,0 +1,127 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #0b0e14;
+  --panel: #11151f;
+  --panel-2: #161b27;
+  --border: #232a3a;
+  --text: #e6e9ef;
+  --muted: #9aa4b8;
+  --accent: #34d399;
+  --accent-dim: #0f3a2e;
+  --blue: #60a5fa;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+}
+
+::selection {
+  background: var(--accent-dim);
+}
+
+/* thin scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2a3346 transparent;
+}
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #2a3346;
+  border-radius: 6px;
+}
+
+/* ---- CodeMirror sizing ---- */
+.cm-editor {
+  height: 100%;
+  font-size: 13.5px;
+}
+.cm-editor .cm-scroller {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.cm-editor.cm-focused {
+  outline: none;
+}
+
+/* ---- Markdown (problem statements) ---- */
+.md {
+  color: var(--text);
+  line-height: 1.65;
+  font-size: 14.5px;
+}
+.md p {
+  margin: 0 0 0.85rem;
+}
+.md strong {
+  color: #fff;
+  font-weight: 600;
+}
+.md h1,
+.md h2,
+.md h3 {
+  font-weight: 600;
+  color: #fff;
+  margin: 1.2rem 0 0.6rem;
+}
+.md ul,
+.md ol {
+  margin: 0 0 0.85rem;
+  padding-left: 1.3rem;
+}
+.md li {
+  margin: 0.2rem 0;
+}
+.md ul {
+  list-style: disc;
+}
+.md ol {
+  list-style: decimal;
+}
+.md code {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.86em;
+  color: #7ee2bb;
+}
+.md pre {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.8rem 1rem;
+  overflow-x: auto;
+  margin: 0 0 0.85rem;
+}
+.md pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text);
+}
+.md table {
+  border-collapse: collapse;
+  margin: 0 0 0.85rem;
+  font-size: 13px;
+}
+.md th,
+.md td {
+  border: 1px solid var(--border);
+  padding: 5px 10px;
+  text-align: left;
+}
+.md th {
+  background: var(--panel-2);
+}

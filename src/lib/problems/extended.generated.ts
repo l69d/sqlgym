@@ -14,7 +14,7 @@ export const extendedProblems: Problem[] = [
     ],
     "description": "An `INNER JOIN` keeps only rows that have a match on **both** sides. Here the match lives in the *same* table: each employee's `manager_id` points at another row's `id`, so we join `employees` to itself.\n\n**Task:** for every employee who **has** a manager, return `employee` (the employee's name) and `manager` (their manager's name). Employees with no manager (`manager_id IS NULL`) are dropped automatically by the inner join.\n\nOutput columns, in this exact order: `employee`, `manager`. Order the rows by `employee` ascending.",
     "setupSql": "CREATE TABLE employees (id INTEGER, name TEXT, manager_id INTEGER);\nINSERT INTO employees VALUES\n  (1, 'Alice', NULL),\n  (2, 'Bob',   1),\n  (3, 'Carol', 1),\n  (4, 'Dave',  2),\n  (5, 'Erin',  2);",
-    "starterSql": "SELECT e.name AS employee, m.name AS manager\nFROM employees e\nJOIN employees m ON e.manager_id = m.id\nORDER BY employee;",
+    "starterSql": "-- Pair each employee with their manager (self-join on the same table)\nSELECT e.name AS employee  /* , the manager's name AS manager */\nFROM employees e\n-- JOIN employees again to look up each employee's manager\nORDER BY employee;",
     "orderMatters": true,
     "hints": [
       "Use the same table twice with two different aliases, e.g. `employees e` for the worker and `employees m` for the manager.",
@@ -41,7 +41,7 @@ export const extendedProblems: Problem[] = [
     ],
     "description": "A `LEFT JOIN` keeps **every** row from the left table even when the right table has no match — the right-side columns come back as `NULL`. That's how you include products that have never sold.\n\n**Task:** list **every** product with the total quantity sold. Products with no sales must still appear, showing `0`. Use `COALESCE` (or `IFNULL`) to turn the `NULL` sum into `0`.\n\nOutput columns, in this exact order: `product`, `units_sold`. Order the rows by `product` ascending.",
     "setupSql": "CREATE TABLE products (id INTEGER, name TEXT);\nINSERT INTO products VALUES\n  (1, 'Pen'), (2, 'Book'), (3, 'Mug'), (4, 'Lamp');\nCREATE TABLE order_items (product_id INTEGER, qty INTEGER);\nINSERT INTO order_items VALUES\n  (1, 3), (1, 2), (2, 5), (3, 1);",
-    "starterSql": "SELECT p.name AS product, COALESCE(SUM(oi.qty), 0) AS units_sold\nFROM products p\nLEFT JOIN order_items oi ON oi.product_id = p.id\nGROUP BY p.id, p.name\nORDER BY product;",
+    "starterSql": "-- Every product with its total units sold (0 when it was never sold)\nSELECT p.name AS product  /* , units_sold */\nFROM products p\n-- LEFT JOIN order_items, SUM the quantities, COALESCE the gaps to 0, GROUP BY product\nORDER BY product;",
     "orderMatters": true,
     "hints": [
       "Start the FROM clause with `products` (the table you must keep in full) and LEFT JOIN `order_items` onto it.",
@@ -68,7 +68,7 @@ export const extendedProblems: Problem[] = [
     ],
     "description": "The bread-and-butter reporting pattern: **join two tables, then aggregate**. Join employees to their department, group by department, and count.\n\n**Task:** return each department's name and how many employees work in it. Only departments that actually have employees should appear (use an inner join).\n\nOutput columns, in this exact order: `department`, `headcount`. Order by `headcount` **descending**, breaking ties by `department` ascending.",
     "setupSql": "CREATE TABLE departments (id INTEGER, name TEXT);\nINSERT INTO departments VALUES\n  (1, 'Engineering'), (2, 'Sales'), (3, 'HR');\nCREATE TABLE employees (id INTEGER, name TEXT, dept_id INTEGER);\nINSERT INTO employees VALUES\n  (1, 'Ana', 1), (2, 'Bo', 1), (3, 'Cy', 1),\n  (4, 'Di', 2), (5, 'Ed', 2), (6, 'Fi', 3);",
-    "starterSql": "SELECT d.name AS department, COUNT(*) AS headcount\nFROM departments d\nJOIN employees e ON e.dept_id = d.id\nGROUP BY d.id, d.name\nORDER BY headcount DESC, department;",
+    "starterSql": "-- Number of employees in each department\nSELECT d.name AS department  /* , headcount */\nFROM departments d\n-- JOIN employees and COUNT per department\n-- ORDER BY headcount DESC, department",
     "orderMatters": true,
     "hints": [
       "Join departments to employees on `e.dept_id = d.id`, then `GROUP BY` the department.",
@@ -95,7 +95,7 @@ export const extendedProblems: Problem[] = [
     ],
     "description": "Not every join matches on equality. A **non-equi join** pairs rows on a *range* — here, each numeric score falls into exactly one grade band.\n\n**Task:** join each student's `score` to the grade band that contains it, where a band matches when `score BETWEEN lo AND hi`. Return the student, their score, and the letter grade.\n\nOutput columns, in this exact order: `student`, `score`, `grade`. Order by `score` **descending**, breaking ties by `student` ascending.",
     "setupSql": "CREATE TABLE scores (student TEXT, score INTEGER);\nINSERT INTO scores VALUES\n  ('Ana', 95), ('Bo', 82), ('Cy', 74), ('Di', 60), ('Ed', 55), ('Fi', 88);\nCREATE TABLE grades (grade TEXT, lo INTEGER, hi INTEGER);\nINSERT INTO grades VALUES\n  ('A', 90, 100), ('B', 80, 89), ('C', 70, 79), ('D', 60, 69), ('F', 0, 59);",
-    "starterSql": "SELECT s.student, s.score, g.grade\nFROM scores s\nJOIN grades g ON s.score BETWEEN g.lo AND g.hi\nORDER BY s.score DESC, s.student;",
+    "starterSql": "-- Map each score to its letter grade using a band (non-equi) join\nSELECT s.student, s.score  /* , grade */\nFROM scores s\n-- JOIN grades where the score falls BETWEEN the band's lo and hi\nORDER BY s.score DESC, s.student;",
     "hints": [
       "The join condition isn't `=`; it's a range test: `s.score BETWEEN g.lo AND g.hi`.",
       "Because the bands don't overlap and cover 0–100, each score matches exactly one band, so the join neither drops nor duplicates students."
@@ -122,7 +122,7 @@ export const extendedProblems: Problem[] = [
     ],
     "description": "A **semi-join** returns rows from one table that have **at least one** match in another — but without duplicating them per match. We want each qualifying customer **once**, no matter how many orders they placed.\n\n**Task:** return the `name` of every customer who has placed **at least one** order. A plain `INNER JOIN` would list Ava twice (she has two orders); a semi-join lists her once.\n\nTwo idiomatic forms are shown: `EXISTS` and `IN`.\n\nOutput column: `name`. Order by `name` ascending.",
     "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers VALUES\n  (1, 'Ava'), (2, 'Ben'), (3, 'Cara'), (4, 'Dan'), (5, 'Eve');\nCREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER);\nINSERT INTO orders VALUES\n  (101, 1, 40), (102, 1, 25), (103, 3, 90), (104, 5, 15);",
-    "starterSql": "SELECT c.name\nFROM customers c\nWHERE EXISTS (\n  SELECT 1 FROM orders o WHERE o.customer_id = c.id\n)\nORDER BY c.name;",
+    "starterSql": "-- Customers who have placed at least one order (semi-join)\nSELECT c.name\nFROM customers c\n-- keep customers for whom an order EXISTS\nORDER BY c.name;",
     "hints": [
       "`EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id)` is true if the customer has any order — and yields the customer once.",
       "`c.id IN (SELECT customer_id FROM orders)` is the equivalent set-membership form."
@@ -154,7 +154,7 @@ export const extendedProblems: Problem[] = [
     ],
     "description": "An **anti-join** returns rows from one table that have **no** match in another — here, customers who never placed an order.\n\n**Task:** return the `name` of every customer who has **zero** rows in `orders`.\n\nThere are two idiomatic ways to write an anti-join, both shown in the solutions: `NOT EXISTS`, and a `LEFT JOIN` that keeps only the rows where the right side came back `NULL`.\n\nOutput column: `name`. Order by `name` ascending.",
     "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers VALUES\n  (1, 'Ava'), (2, 'Ben'), (3, 'Cara'), (4, 'Dan'), (5, 'Eve');\nCREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER);\nINSERT INTO orders VALUES\n  (101, 1, 40), (102, 1, 25), (103, 3, 90), (104, 5, 15);",
-    "starterSql": "SELECT c.name\nFROM customers c\nWHERE NOT EXISTS (\n  SELECT 1 FROM orders o WHERE o.customer_id = c.id\n)\nORDER BY c.name;",
+    "starterSql": "-- Customers with no orders at all (anti-join)\nSELECT c.name\nFROM customers c\n-- keep customers for whom NO order exists\nORDER BY c.name;",
     "hints": [
       "`NOT EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id)` is true exactly for customers with no orders.",
       "The LEFT JOIN version: `LEFT JOIN orders o ON o.customer_id = c.id` then `WHERE o.id IS NULL` — the IS NULL keeps only the non-matching customers."
@@ -185,7 +185,7 @@ export const extendedProblems: Problem[] = [
     ],
     "description": "A `CROSS JOIN` produces the **Cartesian product** — every row of one table paired with every row of the other. It's the tool for generating all combinations, like every size/color variant a garment could come in.\n\n**Task:** produce the full matrix of every `size` paired with every `color`. With 3 sizes and 2 colors you get 3 × 2 = 6 rows.\n\nOutput columns, in this exact order: `size`, `color`. Order by `size` ascending, then `color` ascending.",
     "setupSql": "CREATE TABLE sizes (size TEXT);\nINSERT INTO sizes VALUES ('L'), ('M'), ('S');\nCREATE TABLE colors (color TEXT);\nINSERT INTO colors VALUES ('Blue'), ('Red');",
-    "starterSql": "SELECT s.size AS size, c.color AS color\nFROM sizes s\nCROSS JOIN colors c\nORDER BY size, color;",
+    "starterSql": "-- Every size paired with every color (Cartesian product)\nSELECT s.size AS size, c.color AS color\nFROM sizes s\n-- combine with every row of colors\nORDER BY size, color;",
     "hints": [
       "A `CROSS JOIN` has no ON clause — it pairs each left row with every right row.",
       "3 sizes × 2 colors = 6 combinations. Order by size then color to make the matrix readable."
@@ -217,7 +217,7 @@ export const extendedProblems: Problem[] = [
     ],
     "description": "A **self-join** lets you compare a row to *another* row in the same table — here, today's weather versus yesterday's.\n\n**Task:** find every date whose temperature was strictly **higher** than the temperature on the immediately preceding calendar day. Return just the `recorded_on` date.\n\nMatch \"the previous day\" with date arithmetic: `date(today.recorded_on, '-1 day')` equals yesterday's date. (The first day has no predecessor, so it can never qualify.)\n\nOutput column: `recorded_on`. Order by `recorded_on` ascending.",
     "setupSql": "CREATE TABLE weather (id INTEGER, recorded_on TEXT, temperature INTEGER);\nINSERT INTO weather VALUES\n  (1, '2024-01-01', 30),\n  (2, '2024-01-02', 35),\n  (3, '2024-01-03', 32),\n  (4, '2024-01-04', 40),\n  (5, '2024-01-05', 41),\n  (6, '2024-01-06', 38);",
-    "starterSql": "SELECT today.recorded_on AS recorded_on\nFROM weather today\nJOIN weather yest\n  ON yest.recorded_on = date(today.recorded_on, '-1 day')\nWHERE today.temperature > yest.temperature\nORDER BY recorded_on;",
+    "starterSql": "-- Days that were warmer than the day before (self-join on consecutive dates)\nSELECT today.recorded_on AS recorded_on\nFROM weather today\n-- JOIN weather for the previous day, then keep where today is warmer\nORDER BY recorded_on;",
     "hints": [
       "Join `weather` to itself: alias one copy `today` and the other `yest`.",
       "Pair the two rows on `yest.recorded_on = date(today.recorded_on, '-1 day')`, then keep rows where `today.temperature > yest.temperature`.",
@@ -250,7 +250,7 @@ export const extendedProblems: Problem[] = [
     ],
     "description": "A `FULL OUTER JOIN` keeps **every** row from **both** tables — matched rows are paired, and the unmatched rows from either side appear with `NULL` on the other side. It surfaces orphans on both ends at once: students in no club, and club memberships pointing at an unknown student.\n\n**Task:** list every student paired with every club they belong to. A student with no membership must still appear (with `club` = `NULL`), and a membership whose `student_id` matches no student must still appear (with `student` = `NULL`).\n\nOutput columns, in this exact order: `student`, `club`. Order by `student` ascending with `NULL`s last, then by `club` ascending with `NULL`s last.",
     "setupSql": "CREATE TABLE students (id INTEGER, name TEXT);\nINSERT INTO students VALUES\n  (1, 'Mia'), (2, 'Noah'), (3, 'Olivia');\nCREATE TABLE memberships (student_id INTEGER, club TEXT);\nINSERT INTO memberships VALUES\n  (1, 'Chess'), (1, 'Art'), (3, 'Robotics'), (99, 'Drama');",
-    "starterSql": "SELECT s.name AS student, m.club AS club\nFROM students s\nFULL OUTER JOIN memberships m ON m.student_id = s.id\nORDER BY student NULLS LAST, club NULLS LAST;",
+    "starterSql": "-- Every student and every membership, matched where possible (FULL OUTER JOIN)\nSELECT s.name AS student, m.club AS club\nFROM students s\n-- FULL OUTER JOIN memberships so unmatched rows on BOTH sides survive\nORDER BY student NULLS LAST, club NULLS LAST;",
     "hints": [
       "`FULL OUTER JOIN` is the union of LEFT and RIGHT: rows unmatched on either side are kept with NULLs filling the gaps.",
       "Noah (no membership) gets club = NULL; the Drama membership (student_id 99, no such student) gets student = NULL.",
@@ -283,7 +283,7 @@ export const extendedProblems: Problem[] = [
     ],
     "description": "Finding **pairs** that share a property is a self-join classic. The gotcha is avoiding two kinds of junk: pairing a person with themselves, and listing each pair twice (A-B *and* B-A).\n\n**Task:** find every pair of **distinct** employees who work in the **same** department, listing each unordered pair **once**. Use the `name < name` trick to keep only one ordering of each pair and to drop self-pairs in a single condition.\n\nOutput columns, in this exact order: `employee_a`, `employee_b`, `dept`. Order by `dept` ascending, then `employee_a` ascending, then `employee_b` ascending.",
     "setupSql": "CREATE TABLE employees (id INTEGER, name TEXT, dept TEXT);\nINSERT INTO employees VALUES\n  (1, 'Ana', 'Eng'),\n  (2, 'Bo', 'Eng'),\n  (3, 'Cy', 'Eng'),\n  (4, 'Di', 'Sales'),\n  (5, 'Ed', 'Sales'),\n  (6, 'Fi', 'HR');",
-    "starterSql": "SELECT a.name AS employee_a, b.name AS employee_b, a.dept AS dept\nFROM employees a\nJOIN employees b ON a.dept = b.dept AND a.name < b.name\nORDER BY dept, employee_a, employee_b;",
+    "starterSql": "-- Unique pairs of coworkers in the same department\nSELECT a.name AS employee_a, b.name AS employee_b, a.dept AS dept\nFROM employees a\n-- JOIN employees b in the same dept; use a.name < b.name to drop self-pairs and duplicates\nORDER BY dept, employee_a, employee_b;",
     "hints": [
       "Self-join `employees a` to `employees b` on `a.dept = b.dept`.",
       "Add `a.name < b.name` to the ON clause: `<` is strict so it removes self-pairs (Ana-Ana) and keeps only one of Ana-Bo / Bo-Ana.",
@@ -316,7 +316,7 @@ export const extendedProblems: Problem[] = [
     ],
     "description": "Real schemas spread data across several tables. Here a customer has many orders, and each order has many line items. To total what each customer spent you must chain **three** joins, then aggregate.\n\n**Task:** for each customer return their name and `total_spent`, the sum of `qty * price` over **all** line items across **all** their orders.\n\nOutput columns, in this exact order: `customer`, `total_spent`. Order by `total_spent` **descending**, breaking ties by `customer` ascending.",
     "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers VALUES\n  (1, 'Ava'), (2, 'Ben'), (3, 'Cara');\nCREATE TABLE orders (id INTEGER, customer_id INTEGER);\nINSERT INTO orders VALUES\n  (10, 1), (11, 1), (12, 2), (13, 3);\nCREATE TABLE order_items (order_id INTEGER, product TEXT, qty INTEGER, price INTEGER);\nINSERT INTO order_items VALUES\n  (10, 'Pen', 3, 2),\n  (10, 'Book', 1, 10),\n  (11, 'Pen', 5, 2),\n  (12, 'Book', 2, 10),\n  (13, 'Mug', 4, 5);",
-    "starterSql": "SELECT c.name AS customer, SUM(oi.qty * oi.price) AS total_spent\nFROM customers c\nJOIN orders o ON o.customer_id = c.id\nJOIN order_items oi ON oi.order_id = o.id\nGROUP BY c.id, c.name\nORDER BY total_spent DESC, customer;",
+    "starterSql": "-- Total spend per customer across customers -> orders -> order_items\nSELECT c.name AS customer  /* , total_spent */\nFROM customers c\n-- JOIN orders, then order_items; SUM(qty * price) per customer\n-- ORDER BY total_spent DESC, customer",
     "hints": [
       "Chain the joins: customers → orders (on customer_id) → order_items (on order_id).",
       "Compute each line's value as `qty * price`, then `SUM` it within a `GROUP BY` on the customer.",
@@ -550,7 +550,7 @@ export const extendedProblems: Problem[] = [
     ],
     "description": "`group_concat(x, sep)` stitches the values in a group into a single delimited string. To make the output **deterministic** you must control the order the values are concatenated in.\n\n**Task:** for each `post_id`, build a comma-separated string of its tag `name`s, sorted **alphabetically** within the post.\n\nReturn columns **`post_id`, `tags`** where, for example, a post tagged `sql`, `data`, `db` becomes `data,db,sql` (comma, no spaces). Order the result rows by `post_id` ascending.",
     "setupSql": "CREATE TABLE post_tags (post_id INTEGER, name TEXT);\nINSERT INTO post_tags (post_id, name) VALUES\n  (1, 'sql'),\n  (1, 'data'),\n  (1, 'db'),\n  (2, 'python'),\n  (2, 'etl'),\n  (3, 'cache');",
-    "starterSql": "-- group_concat is order-sensitive; sort the values first\nSELECT post_id, group_concat(name, ',') AS tags\nFROM (SELECT post_id, name FROM post_tags ORDER BY post_id, name)\nGROUP BY post_id\nORDER BY post_id;",
+    "starterSql": "-- One row per post with its tags comma-joined in alphabetical order\nSELECT post_id  /* , tags */\nFROM post_tags\n-- GROUP BY post_id and group_concat the tag names in name order\nORDER BY post_id;",
     "orderMatters": true,
     "hints": [
       "Without an explicit order, group_concat may emit tags in any order.",
@@ -616,7 +616,7 @@ export const extendedProblems: Problem[] = [
     ],
     "description": "The **mode** is the most frequent value in a group. There is no built-in `MODE()` in SQLite, so you build it: count occurrences of each value within each group, then keep the value with the highest count per group.\n\n**Task:** for each `user`, return the `genre` they watched **most often**. The data is designed so each user has a single strict winner (no ties).\n\nReturn columns **`user`, `genre`**. Order by `user` ascending.",
     "setupSql": "CREATE TABLE views (user TEXT, genre TEXT);\nINSERT INTO views (user, genre) VALUES\n  ('Ann', 'Drama'),\n  ('Ann', 'Drama'),\n  ('Ann', 'Comedy'),\n  ('Bob', 'Action'),\n  ('Bob', 'Action'),\n  ('Bob', 'Action'),\n  ('Bob', 'Drama'),\n  ('Cy',  'Horror'),\n  ('Cy',  'Comedy'),\n  ('Cy',  'Comedy');",
-    "starterSql": "-- count per (user, genre), then keep the top genre per user\nWITH counts AS (\n  SELECT user, genre, COUNT(*) AS n\n  FROM views\n  GROUP BY user, genre\n)\nSELECT user, genre\nFROM (\n  SELECT user, genre,\n         ROW_NUMBER() OVER (PARTITION BY user ORDER BY n DESC, genre) AS rk\n  FROM counts\n)\nWHERE rk = 1\nORDER BY user;",
+    "starterSql": "-- Each user's most-watched genre (break ties alphabetically)\nWITH counts AS (\n  -- number of views per (user, genre)\n  SELECT user, genre\n  FROM views\n)\n-- pick the single top genre per user\nSELECT user, genre\nFROM counts\nORDER BY user;",
     "orderMatters": true,
     "hints": [
       "First aggregate: COUNT(*) grouped by (user, genre) gives the play count of each genre per user.",
@@ -946,7 +946,7 @@ export const extendedProblems: Problem[] = [
     ],
     "description": "`UNION` stacks two result sets and **removes duplicate rows**, comparing the *whole row* across both sources. Use it when the same person/value can legitimately appear in both inputs and you want each only once.\n\n**Task:** combine the `employees` and `contractors` name lists into one **distinct** list of people.\n\nReturn a single column **`name`**. Order by `name` ascending.",
     "setupSql": "CREATE TABLE employees (name TEXT);\nINSERT INTO employees (name) VALUES\n  ('Ada'), ('Bea'), ('Cleo');\n\nCREATE TABLE contractors (name TEXT);\nINSERT INTO contractors (name) VALUES\n  ('Bea'), ('Dev'), ('Eli');",
-    "starterSql": "-- Distinct list of everyone in either table\nSELECT name FROM employees\nUNION\nSELECT name FROM contractors\nORDER BY name;\n",
+    "starterSql": "-- All distinct names across employees and contractors\nSELECT name FROM employees\n-- combine with contractors so duplicate names collapse into one\nORDER BY name;",
     "orderMatters": true,
     "hints": [
       "UNION (not UNION ALL) removes duplicate rows automatically.",
@@ -979,7 +979,7 @@ export const extendedProblems: Problem[] = [
     ],
     "description": "`INTERSECT` returns only the rows present in **both** result sets, and like the other set operators it **dedupes** and compares the *entire row*.\n\n**Task:** return the customers who purchased through **both** the online store and the retail store.\n\nReturn a single column **`customer`**. Order by `customer` ascending.",
     "setupSql": "CREATE TABLE online_buyers (customer TEXT);\nINSERT INTO online_buyers (customer) VALUES\n  ('Ada'), ('Bea'), ('Cleo'), ('Bea');\n\nCREATE TABLE retail_buyers (customer TEXT);\nINSERT INTO retail_buyers (customer) VALUES\n  ('Bea'), ('Cleo'), ('Dev');",
-    "starterSql": "-- Customers appearing in BOTH channels\nSELECT customer FROM online_buyers\nINTERSECT\nSELECT customer FROM retail_buyers\nORDER BY customer;\n",
+    "starterSql": "-- Customers who bought on BOTH the online and retail channels\nSELECT customer FROM online_buyers\n-- keep only customers who also appear among retail_buyers\nORDER BY customer;",
     "orderMatters": true,
     "hints": [
       "INTERSECT keeps only values found in both SELECTs.",
@@ -1012,7 +1012,7 @@ export const extendedProblems: Problem[] = [
     ],
     "description": "`EXCEPT` returns rows in the **first** set that are **not** in the second (\"in A but not B\"). It dedupes and compares whole rows, making it a clean way to express set difference.\n\n**Task:** a customer has *churned* if they bought **last year** but **not this year**. Return the churned customers.\n\nReturn a single column **`customer`**. Order by `customer` ascending.",
     "setupSql": "CREATE TABLE last_year (customer TEXT);\nINSERT INTO last_year (customer) VALUES\n  ('Ada'), ('Bea'), ('Cleo'), ('Dev'), ('Bea');\n\nCREATE TABLE this_year (customer TEXT);\nINSERT INTO this_year (customer) VALUES\n  ('Bea'), ('Cleo'), ('Eli');",
-    "starterSql": "-- Bought last year but not this year\nSELECT customer FROM last_year\nEXCEPT\nSELECT customer FROM this_year\nORDER BY customer;\n",
+    "starterSql": "-- Customers from last year who did NOT come back this year\nSELECT customer FROM last_year\n-- remove anyone who also appears this year\nORDER BY customer;",
     "orderMatters": true,
     "hints": [
       "EXCEPT subtracts the second set from the first.",
@@ -1046,7 +1046,7 @@ export const extendedProblems: Problem[] = [
     ],
     "description": "`UNION ALL` keeps duplicates; `UNION` removes them. The difference is observable: stack two login logs and **count** the rows each way.\n\n**Task:** report two counts in a single row — the number of rows when combining the two logs with `UNION ALL` (duplicates kept) and with `UNION` (distinct users).\n\nReturn columns **`all_count`**, **`distinct_count`**. Single row.",
     "setupSql": "CREATE TABLE web_logins (user TEXT);\nINSERT INTO web_logins (user) VALUES\n  ('Ada'), ('Bea'), ('Ada'), ('Cleo');\n\nCREATE TABLE app_logins (user TEXT);\nINSERT INTO app_logins (user) VALUES\n  ('Bea'), ('Dev'), ('Ada');",
-    "starterSql": "-- Compare the row counts of UNION ALL vs UNION\nSELECT\n  (SELECT COUNT(*) FROM (SELECT user FROM web_logins UNION ALL SELECT user FROM app_logins)) AS all_count,\n  (SELECT COUNT(*) FROM (SELECT user FROM web_logins UNION     SELECT user FROM app_logins)) AS distinct_count;\n",
+    "starterSql": "-- One row: total logins (UNION ALL) vs distinct users (UNION)\nSELECT\n  0 AS all_count,       -- replace with a count over UNION ALL\n  0 AS distinct_count;  -- replace with a count over UNION",
     "orderMatters": false,
     "hints": [
       "Wrap each set operation in a derived table and COUNT(*) it.",
@@ -2098,7 +2098,7 @@ export const extendedProblems: Problem[] = [
     ],
     "description": "In SQL, `col = NULL` is **never** TRUE — comparisons with NULL produce UNKNOWN, which the WHERE clause treats as not-true and filters out. To test for missing values you must use `IS NULL` / `IS NOT NULL`. This is the heart of three-valued logic (TRUE / FALSE / UNKNOWN).\n\n**Task:** the `tasks` table has an `assignee` that may be NULL. Return `id`, `title`, and `status` where `status` is `'unassigned'` when `assignee IS NULL` and `'assigned'` otherwise. Then keep only rows that are actually **assigned** (`assignee IS NOT NULL`). Order by `id`.\n\nOutput columns, in order: `id`, `title`, `status`.",
     "setupSql": "CREATE TABLE tasks (id INTEGER, title TEXT, assignee TEXT);\nINSERT INTO tasks (id, title, assignee) VALUES\n  (1, 'Write spec',   'Alice'),\n  (2, 'Fix bug',      NULL),\n  (3, 'Review PR',    'Bob'),\n  (4, 'Deploy',       NULL),\n  (5, 'Update docs',  'Carol');",
-    "starterSql": "-- Use IS NOT NULL to filter; col = NULL would match nothing.\nSELECT id, title,\n       CASE WHEN assignee IS NULL THEN 'unassigned' ELSE 'assigned' END AS status\nFROM tasks\nWHERE assignee IS NOT NULL\nORDER BY id;\n",
+    "starterSql": "-- Return only tasks that have an assignee, each labelled 'assigned'.\n-- Mind three-valued logic: compare with IS [NOT] NULL, never = NULL.\nSELECT id, title,\n       /* label derived from assignee */ '' AS status\nFROM tasks\n-- keep only rows that actually have an assignee\nORDER BY id;",
     "orderMatters": true,
     "hints": [
       "assignee = NULL is UNKNOWN for every row, so it would return nothing — use IS NOT NULL.",
@@ -2130,7 +2130,7 @@ export const extendedProblems: Problem[] = [
     ],
     "description": "You want every customer who has **never** placed an order. The obvious `NOT IN (SELECT customer_id FROM orders)` looks right — but `orders.customer_id` contains a `NULL`. With a NULL in the list, `x NOT IN (..., NULL)` can never evaluate to TRUE (it is NULL/unknown for every `x`), so the query silently returns **zero rows**. The robust fix is a correlated `NOT EXISTS`, which uses row-level matching and is immune to the NULL.\n\n**Task:** return `id` and `name` of every customer with no matching order, using a NULL-safe approach. Order by `id`.\n\nOutput columns, in order: `id`, `name`.\n\n*(Note: the inner `orders.customer_id` set deliberately contains a NULL — this is exactly the case where `NOT IN` breaks and `NOT EXISTS` is required.)*",
     "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers (id, name) VALUES\n  (1, 'Alice'),\n  (2, 'Bob'),\n  (3, 'Carol'),\n  (4, 'Dan'),\n  (5, 'Eve');\nCREATE TABLE orders (order_id INTEGER, customer_id INTEGER);\nINSERT INTO orders (order_id, customer_id) VALUES\n  (101, 1),\n  (102, 3),\n  (103, NULL),\n  (104, 1);",
-    "starterSql": "-- Use NOT EXISTS, not NOT IN: orders.customer_id has a NULL.\nSELECT c.id, c.name\nFROM customers c\nWHERE NOT EXISTS (\n  SELECT 1 FROM orders o WHERE o.customer_id = c.id\n)\nORDER BY c.id;\n",
+    "starterSql": "-- Customers with no orders -- but avoid the NOT IN (... NULL ...) trap.\n-- Prefer NOT EXISTS, or filter NULLs out of the subquery.\nSELECT c.id, c.name\nFROM customers c\n-- keep customers with no matching order (NULL-safe)\nORDER BY c.id;",
     "orderMatters": true,
     "hints": [
       "NOT IN (SELECT customer_id FROM orders) returns 0 rows here because the subquery yields a NULL — every comparison becomes UNKNOWN.",

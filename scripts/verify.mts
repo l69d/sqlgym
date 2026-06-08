@@ -73,6 +73,24 @@ for (const p of problems) {
     continue;
   }
 
+  // Guard: the editor's starter must NOT be a complete, submittable solution.
+  // A starter that errors / returns the wrong rows is a fine skeleton; one that
+  // reproduces the oracle's result is the answer pre-filled — reject it.
+  try {
+    const fromStarter = run(p.setupSql, p.starterSql);
+    if (
+      fromStarter.values.length > 0 &&
+      sameRows(expected.values, fromStarter.values, p.orderMatters)
+    ) {
+      console.error(
+        `✗ [${p.number}] ${p.slug} — starterSql grades as Accepted (it gives away the solution)`,
+      );
+      failures++;
+    }
+  } catch {
+    /* skeleton starter that doesn't run — exactly what we want */
+  }
+
   const approaches = p.approaches ?? [];
   if (approaches.length === 0) {
     console.error(`✗ [${p.number}] ${p.slug} — no approaches`);

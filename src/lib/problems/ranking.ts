@@ -105,9 +105,10 @@ INSERT INTO scores (player, score) VALUES
        DENSE_RANK() OVER (ORDER BY score DESC) AS drnk
 FROM scores
 ORDER BY score DESC, player;`,
-    starterSql: `SELECT player, score,
-       RANK()       OVER (ORDER BY score DESC) AS rnk,
-       DENSE_RANK() OVER (ORDER BY score DESC) AS drnk
+    starterSql: `-- Show RANK() and DENSE_RANK() side by side to see how they treat ties
+SELECT player, score,
+       ... AS rnk,    -- ranking that leaves gaps after ties
+       ... AS drnk    -- ranking with no gaps
 FROM scores
 ORDER BY score DESC, player;`,
     orderMatters: true,
@@ -153,22 +154,16 @@ SELECT MIN(login_date) AS start_date,
 FROM grouped
 GROUP BY grp
 ORDER BY start_date;`,
-    starterSql: `WITH numbered AS (
-  SELECT login_date,
-         ROW_NUMBER() OVER (ORDER BY login_date) AS rn
+    starterSql: `-- Collapse consecutive login days into streaks (gaps & islands).
+-- Hint: subtract a ROW_NUMBER() (in date order) from each date so that
+-- consecutive days share a constant key, then aggregate per key.
+WITH numbered AS (
+  SELECT login_date
   FROM logins
-),
-grouped AS (
-  -- subtract rn days from each date to build a per-streak key
-  SELECT login_date,
-         date(login_date, '-' || rn || ' days') AS grp
-  FROM numbered
 )
-SELECT MIN(login_date) AS start_date,
-       MAX(login_date) AS end_date,
-       COUNT(*)        AS days
-FROM grouped
-GROUP BY grp
+-- return start_date, end_date and the day count for each streak
+SELECT login_date AS start_date
+FROM numbered
 ORDER BY start_date;`,
     orderMatters: true,
     hints: [

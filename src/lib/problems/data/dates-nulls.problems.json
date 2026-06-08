@@ -279,7 +279,7 @@
     "concepts": ["NOT EXISTS", "NOT IN pitfall", "three-valued logic"],
     "description": "You want every customer who has **never** placed an order. The obvious `NOT IN (SELECT customer_id FROM orders)` looks right — but `orders.customer_id` contains a `NULL`. With a NULL in the list, `x NOT IN (..., NULL)` can never evaluate to TRUE (it is NULL/unknown for every `x`), so the query silently returns **zero rows**. The robust fix is a correlated `NOT EXISTS`, which uses row-level matching and is immune to the NULL.\n\n**Task:** return `id` and `name` of every customer with no matching order, using a NULL-safe approach. Order by `id`.\n\nOutput columns, in order: `id`, `name`.\n\n*(Note: the inner `orders.customer_id` set deliberately contains a NULL — this is exactly the case where `NOT IN` breaks and `NOT EXISTS` is required.)*",
     "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers (id, name) VALUES\n  (1, 'Alice'),\n  (2, 'Bob'),\n  (3, 'Carol'),\n  (4, 'Dan'),\n  (5, 'Eve');\nCREATE TABLE orders (order_id INTEGER, customer_id INTEGER);\nINSERT INTO orders (order_id, customer_id) VALUES\n  (101, 1),\n  (102, 3),\n  (103, NULL),\n  (104, 1);",
-    "starterSql": "-- Use NOT EXISTS, not NOT IN: orders.customer_id has a NULL.\nSELECT c.id, c.name\nFROM customers c\nWHERE NOT EXISTS (\n  SELECT 1 FROM orders o WHERE o.customer_id = c.id\n)\nORDER BY c.id;\n",
+    "starterSql": "-- Customers with no orders -- but avoid the NOT IN (... NULL ...) trap.\n-- Prefer NOT EXISTS, or filter NULLs out of the subquery.\nSELECT c.id, c.name\nFROM customers c\n-- keep customers with no matching order (NULL-safe)\nORDER BY c.id;",
     "orderMatters": true,
     "hints": [
       "NOT IN (SELECT customer_id FROM orders) returns 0 rows here because the subquery yields a NULL — every comparison becomes UNKNOWN.",
@@ -306,7 +306,7 @@
     "concepts": ["IS NULL", "IS NOT NULL", "three-valued logic"],
     "description": "In SQL, `col = NULL` is **never** TRUE — comparisons with NULL produce UNKNOWN, which the WHERE clause treats as not-true and filters out. To test for missing values you must use `IS NULL` / `IS NOT NULL`. This is the heart of three-valued logic (TRUE / FALSE / UNKNOWN).\n\n**Task:** the `tasks` table has an `assignee` that may be NULL. Return `id`, `title`, and `status` where `status` is `'unassigned'` when `assignee IS NULL` and `'assigned'` otherwise. Then keep only rows that are actually **assigned** (`assignee IS NOT NULL`). Order by `id`.\n\nOutput columns, in order: `id`, `title`, `status`.",
     "setupSql": "CREATE TABLE tasks (id INTEGER, title TEXT, assignee TEXT);\nINSERT INTO tasks (id, title, assignee) VALUES\n  (1, 'Write spec',   'Alice'),\n  (2, 'Fix bug',      NULL),\n  (3, 'Review PR',    'Bob'),\n  (4, 'Deploy',       NULL),\n  (5, 'Update docs',  'Carol');",
-    "starterSql": "-- Use IS NOT NULL to filter; col = NULL would match nothing.\nSELECT id, title,\n       CASE WHEN assignee IS NULL THEN 'unassigned' ELSE 'assigned' END AS status\nFROM tasks\nWHERE assignee IS NOT NULL\nORDER BY id;\n",
+    "starterSql": "-- Return only tasks that have an assignee, each labelled 'assigned'.\n-- Mind three-valued logic: compare with IS [NOT] NULL, never = NULL.\nSELECT id, title,\n       /* label derived from assignee */ '' AS status\nFROM tasks\n-- keep only rows that actually have an assignee\nORDER BY id;",
     "orderMatters": true,
     "hints": [
       "assignee = NULL is UNKNOWN for every row, so it would return nothing — use IS NOT NULL.",

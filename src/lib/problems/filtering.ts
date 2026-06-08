@@ -27,10 +27,11 @@ FROM purchases
 GROUP BY customer
 HAVING COUNT(DISTINCT product_id) = (SELECT COUNT(*) FROM products)
 ORDER BY customer;`,
-    starterSql: `SELECT customer
+    starterSql: `-- Customers who bought every product (relational division)
+SELECT customer
 FROM purchases
 GROUP BY customer
-HAVING COUNT(DISTINCT product_id) = (SELECT COUNT(*) FROM products)
+-- keep only customers whose distinct-product count equals the total number of products
 ORDER BY customer;`,
     orderMatters: true,
     hints: [
@@ -62,10 +63,10 @@ FROM signups
 GROUP BY email
 HAVING COUNT(*) > 1
 ORDER BY email;`,
-    starterSql: `SELECT email
+    starterSql: `-- Emails that appear more than once
+SELECT email
 FROM signups
-GROUP BY email
-HAVING COUNT(*) > 1
+-- GROUP BY the address, then keep groups seen more than once
 ORDER BY email;`,
     orderMatters: true,
     hints: [
@@ -94,9 +95,10 @@ INSERT INTO salaries (employee, amount) VALUES
     solutionSql: `SELECT MAX(amount) AS second_highest
 FROM salaries
 WHERE amount < (SELECT MAX(amount) FROM salaries);`,
-    starterSql: `SELECT MAX(amount) AS second_highest
-FROM salaries
-WHERE amount < (SELECT MAX(amount) FROM salaries);`,
+    starterSql: `-- Second-highest salary, without ORDER BY ... LIMIT
+-- Idea: the largest amount that is still below the maximum
+SELECT /* ... */ AS second_highest
+FROM salaries;`,
     orderMatters: false,
     hints: [
       "The inner query finds the overall maximum.",
@@ -127,11 +129,10 @@ WHERE NOT EXISTS (
   SELECT 1 FROM orders o WHERE o.customer_id = c.id
 )
 ORDER BY name;`,
-    starterSql: `SELECT name
+    starterSql: `-- Customers who have never placed an order (anti-join)
+SELECT name
 FROM customers c
-WHERE NOT EXISTS (
-  SELECT 1 FROM orders o WHERE o.customer_id = c.id
-)
+-- keep only customers with NO matching row in orders
 ORDER BY name;`,
     orderMatters: true,
     hints: [
@@ -164,12 +165,13 @@ SELECT dept, cnt
 FROM counts
 WHERE cnt > (SELECT AVG(cnt) FROM counts)
 ORDER BY cnt DESC, dept;`,
-    starterSql: `WITH counts AS (
+    starterSql: `-- Departments whose headcount is above the average department headcount
+WITH counts AS (
   SELECT dept, COUNT(*) AS cnt FROM employees GROUP BY dept
 )
 SELECT dept, cnt
 FROM counts
-WHERE cnt > (SELECT AVG(cnt) FROM counts)
+-- keep departments whose cnt exceeds the average cnt across all departments
 ORDER BY cnt DESC, dept;`,
     orderMatters: true,
     hints: [

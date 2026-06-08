@@ -92,8 +92,10 @@ INSERT INTO monthly (month, revenue) VALUES
        revenue - LAG(revenue) OVER (ORDER BY month) AS delta
 FROM monthly
 ORDER BY month;`,
-    starterSql: `SELECT month, revenue,
-       revenue - LAG(revenue) OVER (ORDER BY month) AS delta
+    starterSql: `-- Each month's revenue and its change versus the previous month
+SELECT month, revenue,
+       -- this month's revenue minus the previous month's (use a window function)
+       ... AS delta
 FROM monthly
 ORDER BY month;`,
     orderMatters: true,

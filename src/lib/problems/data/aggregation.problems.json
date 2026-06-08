@@ -150,7 +150,7 @@
     "concepts": ["group_concat", "ordered aggregation", "GROUP BY"],
     "description": "`group_concat(x, sep)` stitches the values in a group into a single delimited string. To make the output **deterministic** you must control the order the values are concatenated in.\n\n**Task:** for each `post_id`, build a comma-separated string of its tag `name`s, sorted **alphabetically** within the post.\n\nReturn columns **`post_id`, `tags`** where, for example, a post tagged `sql`, `data`, `db` becomes `data,db,sql` (comma, no spaces). Order the result rows by `post_id` ascending.",
     "setupSql": "CREATE TABLE post_tags (post_id INTEGER, name TEXT);\nINSERT INTO post_tags (post_id, name) VALUES\n  (1, 'sql'),\n  (1, 'data'),\n  (1, 'db'),\n  (2, 'python'),\n  (2, 'etl'),\n  (3, 'cache');",
-    "starterSql": "-- group_concat is order-sensitive; sort the values first\nSELECT post_id, group_concat(name, ',') AS tags\nFROM (SELECT post_id, name FROM post_tags ORDER BY post_id, name)\nGROUP BY post_id\nORDER BY post_id;",
+    "starterSql": "-- One row per post with its tags comma-joined in alphabetical order\nSELECT post_id  /* , tags */\nFROM post_tags\n-- GROUP BY post_id and group_concat the tag names in name order\nORDER BY post_id;",
     "orderMatters": true,
     "hints": [
       "Without an explicit order, group_concat may emit tags in any order.",
@@ -229,7 +229,7 @@
     "concepts": ["mode", "most-frequent value", "COUNT", "window functions", "GROUP BY"],
     "description": "The **mode** is the most frequent value in a group. There is no built-in `MODE()` in SQLite, so you build it: count occurrences of each value within each group, then keep the value with the highest count per group.\n\n**Task:** for each `user`, return the `genre` they watched **most often**. The data is designed so each user has a single strict winner (no ties).\n\nReturn columns **`user`, `genre`**. Order by `user` ascending.",
     "setupSql": "CREATE TABLE views (user TEXT, genre TEXT);\nINSERT INTO views (user, genre) VALUES\n  ('Ann', 'Drama'),\n  ('Ann', 'Drama'),\n  ('Ann', 'Comedy'),\n  ('Bob', 'Action'),\n  ('Bob', 'Action'),\n  ('Bob', 'Action'),\n  ('Bob', 'Drama'),\n  ('Cy',  'Horror'),\n  ('Cy',  'Comedy'),\n  ('Cy',  'Comedy');",
-    "starterSql": "-- count per (user, genre), then keep the top genre per user\nWITH counts AS (\n  SELECT user, genre, COUNT(*) AS n\n  FROM views\n  GROUP BY user, genre\n)\nSELECT user, genre\nFROM (\n  SELECT user, genre,\n         ROW_NUMBER() OVER (PARTITION BY user ORDER BY n DESC, genre) AS rk\n  FROM counts\n)\nWHERE rk = 1\nORDER BY user;",
+    "starterSql": "-- Each user's most-watched genre (break ties alphabetically)\nWITH counts AS (\n  -- number of views per (user, genre)\n  SELECT user, genre\n  FROM views\n)\n-- pick the single top genre per user\nSELECT user, genre\nFROM counts\nORDER BY user;",
     "orderMatters": true,
     "hints": [
       "First aggregate: COUNT(*) grouped by (user, genre) gives the play count of each genre per user.",

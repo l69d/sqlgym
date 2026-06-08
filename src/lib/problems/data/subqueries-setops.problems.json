@@ -231,7 +231,7 @@
     "concepts": ["UNION", "deduplication", "ORDER BY"],
     "description": "`UNION` stacks two result sets and **removes duplicate rows**, comparing the *whole row* across both sources. Use it when the same person/value can legitimately appear in both inputs and you want each only once.\n\n**Task:** combine the `employees` and `contractors` name lists into one **distinct** list of people.\n\nReturn a single column **`name`**. Order by `name` ascending.",
     "setupSql": "CREATE TABLE employees (name TEXT);\nINSERT INTO employees (name) VALUES\n  ('Ada'), ('Bea'), ('Cleo');\n\nCREATE TABLE contractors (name TEXT);\nINSERT INTO contractors (name) VALUES\n  ('Bea'), ('Dev'), ('Eli');",
-    "starterSql": "-- Distinct list of everyone in either table\nSELECT name FROM employees\nUNION\nSELECT name FROM contractors\nORDER BY name;\n",
+    "starterSql": "-- All distinct names across employees and contractors\nSELECT name FROM employees\n-- combine with contractors so duplicate names collapse into one\nORDER BY name;",
     "orderMatters": true,
     "hints": [
       "UNION (not UNION ALL) removes duplicate rows automatically.",
@@ -259,7 +259,7 @@
     "concepts": ["UNION ALL", "UNION", "duplicates", "COUNT"],
     "description": "`UNION ALL` keeps duplicates; `UNION` removes them. The difference is observable: stack two login logs and **count** the rows each way.\n\n**Task:** report two counts in a single row — the number of rows when combining the two logs with `UNION ALL` (duplicates kept) and with `UNION` (distinct users).\n\nReturn columns **`all_count`**, **`distinct_count`**. Single row.",
     "setupSql": "CREATE TABLE web_logins (user TEXT);\nINSERT INTO web_logins (user) VALUES\n  ('Ada'), ('Bea'), ('Ada'), ('Cleo');\n\nCREATE TABLE app_logins (user TEXT);\nINSERT INTO app_logins (user) VALUES\n  ('Bea'), ('Dev'), ('Ada');",
-    "starterSql": "-- Compare the row counts of UNION ALL vs UNION\nSELECT\n  (SELECT COUNT(*) FROM (SELECT user FROM web_logins UNION ALL SELECT user FROM app_logins)) AS all_count,\n  (SELECT COUNT(*) FROM (SELECT user FROM web_logins UNION     SELECT user FROM app_logins)) AS distinct_count;\n",
+    "starterSql": "-- One row: total logins (UNION ALL) vs distinct users (UNION)\nSELECT\n  0 AS all_count,       -- replace with a count over UNION ALL\n  0 AS distinct_count;  -- replace with a count over UNION",
     "orderMatters": false,
     "hints": [
       "Wrap each set operation in a derived table and COUNT(*) it.",
@@ -287,7 +287,7 @@
     "concepts": ["INTERSECT", "deduplication", "ORDER BY"],
     "description": "`INTERSECT` returns only the rows present in **both** result sets, and like the other set operators it **dedupes** and compares the *entire row*.\n\n**Task:** return the customers who purchased through **both** the online store and the retail store.\n\nReturn a single column **`customer`**. Order by `customer` ascending.",
     "setupSql": "CREATE TABLE online_buyers (customer TEXT);\nINSERT INTO online_buyers (customer) VALUES\n  ('Ada'), ('Bea'), ('Cleo'), ('Bea');\n\nCREATE TABLE retail_buyers (customer TEXT);\nINSERT INTO retail_buyers (customer) VALUES\n  ('Bea'), ('Cleo'), ('Dev');",
-    "starterSql": "-- Customers appearing in BOTH channels\nSELECT customer FROM online_buyers\nINTERSECT\nSELECT customer FROM retail_buyers\nORDER BY customer;\n",
+    "starterSql": "-- Customers who bought on BOTH the online and retail channels\nSELECT customer FROM online_buyers\n-- keep only customers who also appear among retail_buyers\nORDER BY customer;",
     "orderMatters": true,
     "hints": [
       "INTERSECT keeps only values found in both SELECTs.",
@@ -315,7 +315,7 @@
     "concepts": ["EXCEPT", "anti-join", "deduplication"],
     "description": "`EXCEPT` returns rows in the **first** set that are **not** in the second (\"in A but not B\"). It dedupes and compares whole rows, making it a clean way to express set difference.\n\n**Task:** a customer has *churned* if they bought **last year** but **not this year**. Return the churned customers.\n\nReturn a single column **`customer`**. Order by `customer` ascending.",
     "setupSql": "CREATE TABLE last_year (customer TEXT);\nINSERT INTO last_year (customer) VALUES\n  ('Ada'), ('Bea'), ('Cleo'), ('Dev'), ('Bea');\n\nCREATE TABLE this_year (customer TEXT);\nINSERT INTO this_year (customer) VALUES\n  ('Bea'), ('Cleo'), ('Eli');",
-    "starterSql": "-- Bought last year but not this year\nSELECT customer FROM last_year\nEXCEPT\nSELECT customer FROM this_year\nORDER BY customer;\n",
+    "starterSql": "-- Customers from last year who did NOT come back this year\nSELECT customer FROM last_year\n-- remove anyone who also appears this year\nORDER BY customer;",
     "orderMatters": true,
     "hints": [
       "EXCEPT subtracts the second set from the first.",

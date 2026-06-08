@@ -29,14 +29,10 @@ ORDER BY CASE priority
            ELSE 3
          END,
          created;`,
-    starterSql: `SELECT title, priority
+    starterSql: `-- List tasks ordered high -> medium -> low, then by created time
+SELECT title, priority
 FROM tasks
-ORDER BY CASE priority
-           WHEN 'high'   THEN 1
-           WHEN 'medium' THEN 2
-           ELSE 3
-         END,
-         created;`,
+-- ORDER BY a CASE that maps 'high'/'medium'/'low' to 1/2/3, then created`,
     orderMatters: true,
     hints: [
       "Map each priority to a number with CASE.",
@@ -66,9 +62,10 @@ INSERT INTO contacts (name, last_seen) VALUES
     solutionSql: `SELECT name, last_seen
 FROM contacts
 ORDER BY last_seen IS NULL, last_seen DESC;`,
-    starterSql: `SELECT name, last_seen
+    starterSql: `-- Most-recent contacts first, with un-seen contacts (NULL last_seen) sorted last
+SELECT name, last_seen
 FROM contacts
-ORDER BY last_seen IS NULL, last_seen DESC;`,
+-- ORDER BY ...`,
     orderMatters: true,
     hints: [
       "`last_seen IS NULL` evaluates to 0 for real dates and 1 for NULLs.",
@@ -97,10 +94,12 @@ INSERT INTO books (title, price, pages) VALUES
        ROUND(CAST(pages AS REAL) / price, 2) AS value
 FROM books
 ORDER BY value DESC, title;`,
-    starterSql: `SELECT title,
-       ROUND(CAST(pages AS REAL) / price, 2) AS value
+    starterSql: `-- Order books by value = pages per rupee (pages / price), highest first
+SELECT title,
+       -- pages divided by price, rounded to 2 decimals
+       ... AS value
 FROM books
-ORDER BY value DESC, title;`,
+-- ORDER BY value DESC, title`,
     orderMatters: true,
     hints: [
       "CAST pages to REAL so the division isn't integer division.",
@@ -129,9 +128,10 @@ INSERT INTO employees (name, dept, salary) VALUES
     solutionSql: `SELECT dept, name, salary
 FROM employees
 ORDER BY dept ASC, salary DESC, name ASC;`,
-    starterSql: `SELECT dept, name, salary
+    starterSql: `-- Sort by department A->Z, then salary high->low, then name A->Z
+SELECT dept, name, salary
 FROM employees
-ORDER BY dept ASC, salary DESC, name ASC;`,
+-- ORDER BY ...`,
     orderMatters: true,
     hints: [
       "List the keys in priority order: dept, then salary, then name.",

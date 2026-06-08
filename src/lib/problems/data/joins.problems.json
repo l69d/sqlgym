@@ -1,0 +1,278 @@
+[
+  {
+    "slug": "employee-and-their-manager",
+    "title": "Employee and Their Manager",
+    "difficulty": "Easy",
+    "category": "Joins",
+    "concepts": ["INNER JOIN", "self-join"],
+    "description": "An `INNER JOIN` keeps only rows that have a match on **both** sides. Here the match lives in the *same* table: each employee's `manager_id` points at another row's `id`, so we join `employees` to itself.\n\n**Task:** for every employee who **has** a manager, return `employee` (the employee's name) and `manager` (their manager's name). Employees with no manager (`manager_id IS NULL`) are dropped automatically by the inner join.\n\nOutput columns, in this exact order: `employee`, `manager`. Order the rows by `employee` ascending.",
+    "setupSql": "CREATE TABLE employees (id INTEGER, name TEXT, manager_id INTEGER);\nINSERT INTO employees VALUES\n  (1, 'Alice', NULL),\n  (2, 'Bob',   1),\n  (3, 'Carol', 1),\n  (4, 'Dave',  2),\n  (5, 'Erin',  2);",
+    "starterSql": "SELECT e.name AS employee, m.name AS manager\nFROM employees e\nJOIN employees m ON e.manager_id = m.id\nORDER BY employee;",
+    "orderMatters": true,
+    "hints": [
+      "Use the same table twice with two different aliases, e.g. `employees e` for the worker and `employees m` for the manager.",
+      "The join condition is `e.manager_id = m.id`. Because it's an INNER JOIN, Alice (whose manager_id is NULL) never matches and is excluded automatically."
+    ],
+    "approaches": [
+      {
+        "name": "Self-join (INNER JOIN)",
+        "sql": "SELECT e.name AS employee, m.name AS manager\nFROM employees e\nJOIN employees m ON e.manager_id = m.id\nORDER BY employee;",
+        "explanation": "**Step 1 — two aliases for one table.** `FROM employees e JOIN employees m` lists the `employees` table twice. `e` is the *employee* role and `m` is the *manager* role. Aliases are mandatory here, otherwise `id` and `name` would be ambiguous.\n\n**Step 2 — the join condition.** `ON e.manager_id = m.id` lines up each employee row with the row whose `id` equals that employee's `manager_id`. So Bob (manager_id 1) matches the row where `m.id = 1`, which is Alice.\n\n**Step 3 — why Alice disappears.** Alice's `manager_id` is `NULL`. `NULL = m.id` is never true, so an `INNER JOIN` produces no row for her. That is exactly what we want: only employees who *have* a manager.\n\n**Step 4 — project and order.** We select `e.name AS employee` and `m.name AS manager`, then `ORDER BY employee` for a stable, alphabetical result."
+      }
+    ]
+  },
+  {
+    "slug": "every-product-and-units-sold",
+    "title": "Every Product and Units Sold",
+    "difficulty": "Easy",
+    "category": "Joins",
+    "concepts": ["LEFT JOIN", "COALESCE", "GROUP BY"],
+    "description": "A `LEFT JOIN` keeps **every** row from the left table even when the right table has no match — the right-side columns come back as `NULL`. That's how you include products that have never sold.\n\n**Task:** list **every** product with the total quantity sold. Products with no sales must still appear, showing `0`. Use `COALESCE` (or `IFNULL`) to turn the `NULL` sum into `0`.\n\nOutput columns, in this exact order: `product`, `units_sold`. Order the rows by `product` ascending.",
+    "setupSql": "CREATE TABLE products (id INTEGER, name TEXT);\nINSERT INTO products VALUES\n  (1, 'Pen'), (2, 'Book'), (3, 'Mug'), (4, 'Lamp');\nCREATE TABLE order_items (product_id INTEGER, qty INTEGER);\nINSERT INTO order_items VALUES\n  (1, 3), (1, 2), (2, 5), (3, 1);",
+    "starterSql": "SELECT p.name AS product, COALESCE(SUM(oi.qty), 0) AS units_sold\nFROM products p\nLEFT JOIN order_items oi ON oi.product_id = p.id\nGROUP BY p.id, p.name\nORDER BY product;",
+    "orderMatters": true,
+    "hints": [
+      "Start the FROM clause with `products` (the table you must keep in full) and LEFT JOIN `order_items` onto it.",
+      "For a product with no rows in order_items, `SUM(oi.qty)` is NULL. Wrap it in `COALESCE(..., 0)` so Lamp shows 0 instead of NULL."
+    ],
+    "approaches": [
+      {
+        "name": "LEFT JOIN + COALESCE",
+        "sql": "SELECT p.name AS product, COALESCE(SUM(oi.qty), 0) AS units_sold\nFROM products p\nLEFT JOIN order_items oi ON oi.product_id = p.id\nGROUP BY p.id, p.name\nORDER BY product;",
+        "explanation": "**Step 1 — keep all products.** `FROM products p LEFT JOIN order_items oi` means *every* product survives even if no `order_items` row matches. For Lamp (never sold) the join still emits one row, with all `oi.*` columns set to `NULL`.\n\n**Step 2 — group per product.** `GROUP BY p.id, p.name` collapses each product's matching item rows into one. Pen has two item rows (3 and 2), so they fold into a single group.\n\n**Step 3 — sum the quantities.** `SUM(oi.qty)` adds the quantities within each group: Pen → 5, Book → 5, Mug → 1. For Lamp the only value is `NULL`, and `SUM` over nothing-but-NULL returns `NULL`.\n\n**Step 4 — fix the NULL.** `COALESCE(SUM(oi.qty), 0)` replaces that `NULL` with `0`, so Lamp reports `0`. This is the classic gotcha: an inner join would have *dropped* Lamp entirely; the LEFT JOIN keeps it but you must defuse the NULL yourself.\n\n**Step 5 — order.** `ORDER BY product` returns Book, Lamp, Mug, Pen alphabetically."
+      }
+    ]
+  },
+  {
+    "slug": "headcount-per-department",
+    "title": "Headcount per Department",
+    "difficulty": "Easy",
+    "category": "Joins",
+    "concepts": ["INNER JOIN", "GROUP BY", "COUNT"],
+    "description": "The bread-and-butter reporting pattern: **join two tables, then aggregate**. Join employees to their department, group by department, and count.\n\n**Task:** return each department's name and how many employees work in it. Only departments that actually have employees should appear (use an inner join).\n\nOutput columns, in this exact order: `department`, `headcount`. Order by `headcount` **descending**, breaking ties by `department` ascending.",
+    "setupSql": "CREATE TABLE departments (id INTEGER, name TEXT);\nINSERT INTO departments VALUES\n  (1, 'Engineering'), (2, 'Sales'), (3, 'HR');\nCREATE TABLE employees (id INTEGER, name TEXT, dept_id INTEGER);\nINSERT INTO employees VALUES\n  (1, 'Ana', 1), (2, 'Bo', 1), (3, 'Cy', 1),\n  (4, 'Di', 2), (5, 'Ed', 2), (6, 'Fi', 3);",
+    "starterSql": "SELECT d.name AS department, COUNT(*) AS headcount\nFROM departments d\nJOIN employees e ON e.dept_id = d.id\nGROUP BY d.id, d.name\nORDER BY headcount DESC, department;",
+    "orderMatters": true,
+    "hints": [
+      "Join departments to employees on `e.dept_id = d.id`, then `GROUP BY` the department.",
+      "`COUNT(*)` counts the joined rows in each group — which equals the number of employees in that department."
+    ],
+    "approaches": [
+      {
+        "name": "Join then GROUP BY",
+        "sql": "SELECT d.name AS department, COUNT(*) AS headcount\nFROM departments d\nJOIN employees e ON e.dept_id = d.id\nGROUP BY d.id, d.name\nORDER BY headcount DESC, department;",
+        "explanation": "**Step 1 — join.** `departments d JOIN employees e ON e.dept_id = d.id` pairs each employee with their department. After the join there is one row per employee, now carrying the department name.\n\n**Step 2 — group.** `GROUP BY d.id, d.name` buckets those rows by department. Grouping on `d.id` (the key) is the safe habit; we add `d.name` only so it can be selected.\n\n**Step 3 — count.** Within each bucket `COUNT(*)` counts the rows, i.e. the employees: Engineering 3, Sales 2, HR 1.\n\n**Step 4 — order.** `ORDER BY headcount DESC, department` sorts biggest team first; the `department` tiebreaker guarantees a single deterministic order even if two departments tied."
+      }
+    ]
+  },
+  {
+    "slug": "warmer-than-the-previous-day",
+    "title": "Warmer Than the Previous Day",
+    "difficulty": "Medium",
+    "category": "Joins",
+    "concepts": ["self-join", "non-equi join", "date arithmetic"],
+    "description": "A **self-join** lets you compare a row to *another* row in the same table — here, today's weather versus yesterday's.\n\n**Task:** find every date whose temperature was strictly **higher** than the temperature on the immediately preceding calendar day. Return just the `recorded_on` date.\n\nMatch \"the previous day\" with date arithmetic: `date(today.recorded_on, '-1 day')` equals yesterday's date. (The first day has no predecessor, so it can never qualify.)\n\nOutput column: `recorded_on`. Order by `recorded_on` ascending.",
+    "setupSql": "CREATE TABLE weather (id INTEGER, recorded_on TEXT, temperature INTEGER);\nINSERT INTO weather VALUES\n  (1, '2024-01-01', 30),\n  (2, '2024-01-02', 35),\n  (3, '2024-01-03', 32),\n  (4, '2024-01-04', 40),\n  (5, '2024-01-05', 41),\n  (6, '2024-01-06', 38);",
+    "starterSql": "SELECT today.recorded_on AS recorded_on\nFROM weather today\nJOIN weather yest\n  ON yest.recorded_on = date(today.recorded_on, '-1 day')\nWHERE today.temperature > yest.temperature\nORDER BY recorded_on;",
+    "hints": [
+      "Join `weather` to itself: alias one copy `today` and the other `yest`.",
+      "Pair the two rows on `yest.recorded_on = date(today.recorded_on, '-1 day')`, then keep rows where `today.temperature > yest.temperature`.",
+      "An equivalent solution uses `LAG(temperature) OVER (ORDER BY recorded_on)` to fetch the previous day's value without a join."
+    ],
+    "orderMatters": true,
+    "approaches": [
+      {
+        "name": "Self-join on adjacent dates",
+        "sql": "SELECT today.recorded_on AS recorded_on\nFROM weather today\nJOIN weather yest\n  ON yest.recorded_on = date(today.recorded_on, '-1 day')\nWHERE today.temperature > yest.temperature\nORDER BY recorded_on;",
+        "explanation": "**Step 1 — two copies of one table.** `weather today JOIN weather yest` gives us two independent handles on the same data: `today` is the row we're judging, `yest` is its predecessor.\n\n**Step 2 — link adjacent days.** `ON yest.recorded_on = date(today.recorded_on, '-1 day')` is a *non-equi* join in spirit: instead of matching on equal keys, it matches each `today` row to the row dated exactly one day earlier. `date('2024-01-02','-1 day')` is `'2024-01-01'`, so 01-02 pairs with 01-01.\n\n**Step 3 — the comparison.** `WHERE today.temperature > yest.temperature` keeps only days that were strictly warmer than the day before. 01-02 (35 > 30) qualifies; 01-03 (32 > 35) does not.\n\n**Step 4 — the first day.** 01-01 has no row dated 2023-12-31, so the join finds no partner and it's dropped — correct, it has no \"previous day\" to beat.\n\n**Step 5 — order.** `ORDER BY recorded_on` lists the qualifying dates chronologically: 01-02, 01-04, 01-05."
+      },
+      {
+        "name": "Window function (LAG)",
+        "sql": "SELECT recorded_on\nFROM (\n  SELECT recorded_on,\n         temperature,\n         LAG(temperature) OVER (ORDER BY recorded_on) AS prev_temp\n  FROM weather\n) t\nWHERE temperature > prev_temp\nORDER BY recorded_on;",
+        "explanation": "**Step 1 — pull yesterday onto today's row.** In the subquery, `LAG(temperature) OVER (ORDER BY recorded_on)` copies the previous chronological row's temperature into `prev_temp`, so each row now knows both today's and yesterday's reading without a join.\n\n**Step 2 — the first row's prev is NULL.** The earliest date has no prior row, so `prev_temp` is `NULL`. `temperature > NULL` evaluates to NULL (not true), so 01-01 is filtered out — matching the self-join's behaviour.\n\n**Step 3 — filter and order.** The outer query keeps rows where `temperature > prev_temp` and orders by `recorded_on`, producing the identical set 01-02, 01-04, 01-05."
+      }
+    ]
+  },
+  {
+    "slug": "customers-without-orders-antijoin",
+    "title": "Customers Without Orders",
+    "difficulty": "Medium",
+    "category": "Joins",
+    "concepts": ["anti-join", "NOT EXISTS", "LEFT JOIN ... IS NULL"],
+    "description": "An **anti-join** returns rows from one table that have **no** match in another — here, customers who never placed an order.\n\n**Task:** return the `name` of every customer who has **zero** rows in `orders`.\n\nThere are two idiomatic ways to write an anti-join, both shown in the solutions: `NOT EXISTS`, and a `LEFT JOIN` that keeps only the rows where the right side came back `NULL`.\n\nOutput column: `name`. Order by `name` ascending.",
+    "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers VALUES\n  (1, 'Ava'), (2, 'Ben'), (3, 'Cara'), (4, 'Dan'), (5, 'Eve');\nCREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER);\nINSERT INTO orders VALUES\n  (101, 1, 40), (102, 1, 25), (103, 3, 90), (104, 5, 15);",
+    "starterSql": "SELECT c.name\nFROM customers c\nWHERE NOT EXISTS (\n  SELECT 1 FROM orders o WHERE o.customer_id = c.id\n)\nORDER BY c.name;",
+    "hints": [
+      "`NOT EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id)` is true exactly for customers with no orders.",
+      "The LEFT JOIN version: `LEFT JOIN orders o ON o.customer_id = c.id` then `WHERE o.id IS NULL` — the IS NULL keeps only the non-matching customers."
+    ],
+    "orderMatters": true,
+    "approaches": [
+      {
+        "name": "NOT EXISTS",
+        "sql": "SELECT c.name\nFROM customers c\nWHERE NOT EXISTS (\n  SELECT 1 FROM orders o WHERE o.customer_id = c.id\n)\nORDER BY c.name;",
+        "explanation": "**Step 1 — the correlated subquery.** For each customer `c`, the inner `SELECT 1 FROM orders o WHERE o.customer_id = c.id` asks \"does this customer have any order?\" The `SELECT 1` is a convention — `EXISTS` only cares whether *a* row comes back, never the value.\n\n**Step 2 — negate it.** `NOT EXISTS (...)` flips that to \"this customer has **no** matching order.\" Ava and Cara and Eve do have orders, so they're rejected; Ben and Dan are kept.\n\n**Step 3 — why this is the clean anti-join.** `NOT EXISTS` short-circuits on the first match and handles `NULL` customer_ids gracefully, which is why it's the textbook way to express \"rows with no counterpart.\"\n\n**Step 4 — order.** `ORDER BY c.name` returns Ben, Dan."
+      },
+      {
+        "name": "LEFT JOIN ... IS NULL",
+        "sql": "SELECT c.name\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.id\nWHERE o.id IS NULL\nORDER BY c.name;",
+        "explanation": "**Step 1 — keep all customers.** `LEFT JOIN orders o` emits a row for every customer; matched customers get real order data, unmatched ones get `NULL` in all `o.*` columns.\n\n**Step 2 — the IS NULL filter is the trick.** `WHERE o.id IS NULL` keeps **only** the rows where no order matched (a real order can never have a NULL `id`). This converts the outer join into an anti-join.\n\n**Step 3 — careful which column you test.** Test a column that is guaranteed non-NULL for any real match — here the primary key `o.id`. Testing a nullable column would wrongly admit rows. A customer with multiple orders (like Ava) yields multiple matched rows, every one of which has a non-NULL `o.id`, so she's correctly excluded.\n\n**Step 4 — result.** Same two customers, Ben and Dan, in name order — identical to the NOT EXISTS version."
+      }
+    ]
+  },
+  {
+    "slug": "customers-who-placed-orders-semijoin",
+    "title": "Customers Who Placed Orders",
+    "difficulty": "Medium",
+    "category": "Joins",
+    "concepts": ["semi-join", "EXISTS", "IN"],
+    "description": "A **semi-join** returns rows from one table that have **at least one** match in another — but without duplicating them per match. We want each qualifying customer **once**, no matter how many orders they placed.\n\n**Task:** return the `name` of every customer who has placed **at least one** order. A plain `INNER JOIN` would list Ava twice (she has two orders); a semi-join lists her once.\n\nTwo idiomatic forms are shown: `EXISTS` and `IN`.\n\nOutput column: `name`. Order by `name` ascending.",
+    "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers VALUES\n  (1, 'Ava'), (2, 'Ben'), (3, 'Cara'), (4, 'Dan'), (5, 'Eve');\nCREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER);\nINSERT INTO orders VALUES\n  (101, 1, 40), (102, 1, 25), (103, 3, 90), (104, 5, 15);",
+    "starterSql": "SELECT c.name\nFROM customers c\nWHERE EXISTS (\n  SELECT 1 FROM orders o WHERE o.customer_id = c.id\n)\nORDER BY c.name;",
+    "hints": [
+      "`EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id)` is true if the customer has any order — and yields the customer once.",
+      "`c.id IN (SELECT customer_id FROM orders)` is the equivalent set-membership form."
+    ],
+    "orderMatters": true,
+    "approaches": [
+      {
+        "name": "EXISTS",
+        "sql": "SELECT c.name\nFROM customers c\nWHERE EXISTS (\n  SELECT 1 FROM orders o WHERE o.customer_id = c.id\n)\nORDER BY c.name;",
+        "explanation": "**Step 1 — ask for existence, not the rows.** For each customer, `EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id)` is true the moment a single matching order is found.\n\n**Step 2 — why not just INNER JOIN?** An inner join would emit one output row *per matching order*, so Ava (orders 101 and 102) would appear twice. `EXISTS` is a filter on the customer row itself, so each customer is reported at most once — that's the defining property of a semi-join.\n\n**Step 3 — the result.** Ava, Cara, Eve have orders; Ben and Dan don't. `ORDER BY c.name` returns Ava, Cara, Eve."
+      },
+      {
+        "name": "IN subquery",
+        "sql": "SELECT c.name\nFROM customers c\nWHERE c.id IN (SELECT customer_id FROM orders)\nORDER BY c.name;",
+        "explanation": "**Step 1 — build the set of buyers.** `SELECT customer_id FROM orders` produces the customer ids that appear in `orders`: {1, 1, 3, 5}.\n\n**Step 2 — membership test.** `c.id IN (...)` keeps a customer if their id is in that set. Duplicates in the set don't matter — `IN` is membership, so each customer is still evaluated once and returned once.\n\n**Step 3 — identical result.** Ava (1), Cara (3), Eve (5) pass; Ben and Dan don't. Ordered by name this matches the EXISTS solution exactly. (One caveat to remember: `IN` and `NOT IN` behave differently around NULLs — for the *negative* case `NOT EXISTS` is safer — but for this positive semi-join either form is fine.)"
+      }
+    ]
+  },
+  {
+    "slug": "assign-letter-grades-band-join",
+    "title": "Assign Letter Grades (Band Join)",
+    "difficulty": "Medium",
+    "category": "Joins",
+    "concepts": ["non-equi join", "BETWEEN", "range lookup"],
+    "description": "Not every join matches on equality. A **non-equi join** pairs rows on a *range* — here, each numeric score falls into exactly one grade band.\n\n**Task:** join each student's `score` to the grade band that contains it, where a band matches when `score BETWEEN lo AND hi`. Return the student, their score, and the letter grade.\n\nOutput columns, in this exact order: `student`, `score`, `grade`. Order by `score` **descending**, breaking ties by `student` ascending.",
+    "setupSql": "CREATE TABLE scores (student TEXT, score INTEGER);\nINSERT INTO scores VALUES\n  ('Ana', 95), ('Bo', 82), ('Cy', 74), ('Di', 60), ('Ed', 55), ('Fi', 88);\nCREATE TABLE grades (grade TEXT, lo INTEGER, hi INTEGER);\nINSERT INTO grades VALUES\n  ('A', 90, 100), ('B', 80, 89), ('C', 70, 79), ('D', 60, 69), ('F', 0, 59);",
+    "starterSql": "SELECT s.student, s.score, g.grade\nFROM scores s\nJOIN grades g ON s.score BETWEEN g.lo AND g.hi\nORDER BY s.score DESC, s.student;",
+    "hints": [
+      "The join condition isn't `=`; it's a range test: `s.score BETWEEN g.lo AND g.hi`.",
+      "Because the bands don't overlap and cover 0–100, each score matches exactly one band, so the join neither drops nor duplicates students."
+    ],
+    "orderMatters": true,
+    "approaches": [
+      {
+        "name": "BETWEEN range join",
+        "sql": "SELECT s.student, s.score, g.grade\nFROM scores s\nJOIN grades g ON s.score BETWEEN g.lo AND g.hi\nORDER BY s.score DESC, s.student;",
+        "explanation": "**Step 1 — join on a range, not equality.** `ON s.score BETWEEN g.lo AND g.hi` is shorthand for `s.score >= g.lo AND s.score <= g.hi`. Each student row is tested against every band and keeps the band whose `[lo, hi]` interval contains the score.\n\n**Step 2 — why exactly one match.** The five bands are contiguous and non-overlapping (0–59, 60–69, 70–79, 80–89, 90–100). A score lands in precisely one interval, so the non-equi join behaves like a clean lookup — no student is dropped and none is duplicated. (If the bands overlapped, a student could match two rows.)\n\n**Step 3 — map the values.** 95 → A, 88 → B, 82 → B, 74 → C, 60 → D, 55 → F.\n\n**Step 4 — order.** `ORDER BY s.score DESC, s.student` ranks highest score first; the `student` tiebreaker makes the order total even though no two scores tie here."
+      }
+    ]
+  },
+  {
+    "slug": "size-color-product-matrix",
+    "title": "Size × Color Product Matrix",
+    "difficulty": "Medium",
+    "category": "Joins",
+    "concepts": ["CROSS JOIN", "Cartesian product"],
+    "description": "A `CROSS JOIN` produces the **Cartesian product** — every row of one table paired with every row of the other. It's the tool for generating all combinations, like every size/color variant a garment could come in.\n\n**Task:** produce the full matrix of every `size` paired with every `color`. With 3 sizes and 2 colors you get 3 × 2 = 6 rows.\n\nOutput columns, in this exact order: `size`, `color`. Order by `size` ascending, then `color` ascending.",
+    "setupSql": "CREATE TABLE sizes (size TEXT);\nINSERT INTO sizes VALUES ('L'), ('M'), ('S');\nCREATE TABLE colors (color TEXT);\nINSERT INTO colors VALUES ('Blue'), ('Red');",
+    "starterSql": "SELECT s.size AS size, c.color AS color\nFROM sizes s\nCROSS JOIN colors c\nORDER BY size, color;",
+    "hints": [
+      "A `CROSS JOIN` has no ON clause — it pairs each left row with every right row.",
+      "3 sizes × 2 colors = 6 combinations. Order by size then color to make the matrix readable."
+    ],
+    "orderMatters": true,
+    "approaches": [
+      {
+        "name": "CROSS JOIN",
+        "sql": "SELECT s.size AS size, c.color AS color\nFROM sizes s\nCROSS JOIN colors c\nORDER BY size, color;",
+        "explanation": "**Step 1 — no join condition.** `sizes s CROSS JOIN colors c` deliberately omits any `ON` clause. Every one of the 3 size rows is combined with every one of the 2 color rows, yielding 3 × 2 = 6 pairs — the Cartesian product.\n\n**Step 2 — select both sides.** We project `s.size` and `c.color` so each output row names one full variant, e.g. (L, Blue), (L, Red), (M, Blue) …\n\n**Step 3 — order for readability.** `ORDER BY size, color` groups the rows by size and, within each size, by color. Note sizes are sorted alphabetically (L, M, S), which is why L comes first. The ordering keys are a total order over the 6 distinct pairs, so the result is deterministic."
+      },
+      {
+        "name": "Comma join (implicit cross)",
+        "sql": "SELECT s.size AS size, c.color AS color\nFROM sizes s, colors c\nORDER BY size, color;",
+        "explanation": "**Step 1 — comma means cross join.** Listing two tables separated by a comma with no `WHERE` linking them, `FROM sizes s, colors c`, is the older syntax for a Cartesian product. It produces exactly the same 6 pairs as the explicit `CROSS JOIN`.\n\n**Step 2 — why prefer the explicit form.** `CROSS JOIN` states the intent loudly; a comma join can hide an *accidental* cross product when someone forgets the `WHERE`. Here it's intentional, so both are correct and return the identical result set once ordered by `size, color`."
+      }
+    ]
+  },
+  {
+    "slug": "spend-per-customer-three-tables",
+    "title": "Spend per Customer Across Three Tables",
+    "difficulty": "Hard",
+    "category": "Joins",
+    "concepts": ["three-table join", "GROUP BY", "SUM"],
+    "description": "Real schemas spread data across several tables. Here a customer has many orders, and each order has many line items. To total what each customer spent you must chain **three** joins, then aggregate.\n\n**Task:** for each customer return their name and `total_spent`, the sum of `qty * price` over **all** line items across **all** their orders.\n\nOutput columns, in this exact order: `customer`, `total_spent`. Order by `total_spent` **descending**, breaking ties by `customer` ascending.",
+    "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers VALUES\n  (1, 'Ava'), (2, 'Ben'), (3, 'Cara');\nCREATE TABLE orders (id INTEGER, customer_id INTEGER);\nINSERT INTO orders VALUES\n  (10, 1), (11, 1), (12, 2), (13, 3);\nCREATE TABLE order_items (order_id INTEGER, product TEXT, qty INTEGER, price INTEGER);\nINSERT INTO order_items VALUES\n  (10, 'Pen', 3, 2),\n  (10, 'Book', 1, 10),\n  (11, 'Pen', 5, 2),\n  (12, 'Book', 2, 10),\n  (13, 'Mug', 4, 5);",
+    "starterSql": "SELECT c.name AS customer, SUM(oi.qty * oi.price) AS total_spent\nFROM customers c\nJOIN orders o ON o.customer_id = c.id\nJOIN order_items oi ON oi.order_id = o.id\nGROUP BY c.id, c.name\nORDER BY total_spent DESC, customer;",
+    "hints": [
+      "Chain the joins: customers → orders (on customer_id) → order_items (on order_id).",
+      "Compute each line's value as `qty * price`, then `SUM` it within a `GROUP BY` on the customer.",
+      "Group on `c.id` (and carry `c.name`) so two different customers with the same name wouldn't collide."
+    ],
+    "orderMatters": true,
+    "approaches": [
+      {
+        "name": "Three-table join + GROUP BY",
+        "sql": "SELECT c.name AS customer, SUM(oi.qty * oi.price) AS total_spent\nFROM customers c\nJOIN orders o ON o.customer_id = c.id\nJOIN order_items oi ON oi.order_id = o.id\nGROUP BY c.id, c.name\nORDER BY total_spent DESC, customer;",
+        "explanation": "**Step 1 — chain the joins.** `customers c JOIN orders o ON o.customer_id = c.id` attaches each order to its customer; `JOIN order_items oi ON oi.order_id = o.id` then attaches each line item to its order. After both joins, there is exactly one row per *line item*, decorated with its order and customer.\n\n**Step 2 — compute the per-line value.** `oi.qty * oi.price` is the money for that single line. Ava's order 10 has Pen (3×2 = 6) and Book (1×10 = 10); her order 11 has Pen (5×2 = 10).\n\n**Step 3 — aggregate per customer.** `GROUP BY c.id, c.name` folds all of a customer's line-item rows together and `SUM(oi.qty * oi.price)` totals them: Ava 6+10+10 = 26, Ben 2×10 = 20, Cara 4×5 = 20.\n\n**Step 4 — why group on the id.** Grouping on the primary key `c.id` (not just the name) is the robust habit — two customers could share a name, and the id keeps them separate.\n\n**Step 5 — order.** `ORDER BY total_spent DESC, customer` puts the biggest spender first; Ben and Cara tie at 20, so the `customer` tiebreaker places Ben before Cara, giving one deterministic order."
+      }
+    ]
+  },
+  {
+    "slug": "all-students-and-all-memberships-fullouter",
+    "title": "All Students and All Memberships",
+    "difficulty": "Hard",
+    "category": "Joins",
+    "concepts": ["FULL OUTER JOIN", "NULLS LAST", "unmatched rows"],
+    "description": "A `FULL OUTER JOIN` keeps **every** row from **both** tables — matched rows are paired, and the unmatched rows from either side appear with `NULL` on the other side. It surfaces orphans on both ends at once: students in no club, and club memberships pointing at an unknown student.\n\n**Task:** list every student paired with every club they belong to. A student with no membership must still appear (with `club` = `NULL`), and a membership whose `student_id` matches no student must still appear (with `student` = `NULL`).\n\nOutput columns, in this exact order: `student`, `club`. Order by `student` ascending with `NULL`s last, then by `club` ascending with `NULL`s last.",
+    "setupSql": "CREATE TABLE students (id INTEGER, name TEXT);\nINSERT INTO students VALUES\n  (1, 'Mia'), (2, 'Noah'), (3, 'Olivia');\nCREATE TABLE memberships (student_id INTEGER, club TEXT);\nINSERT INTO memberships VALUES\n  (1, 'Chess'), (1, 'Art'), (3, 'Robotics'), (99, 'Drama');",
+    "starterSql": "SELECT s.name AS student, m.club AS club\nFROM students s\nFULL OUTER JOIN memberships m ON m.student_id = s.id\nORDER BY student NULLS LAST, club NULLS LAST;",
+    "hints": [
+      "`FULL OUTER JOIN` is the union of LEFT and RIGHT: rows unmatched on either side are kept with NULLs filling the gaps.",
+      "Noah (no membership) gets club = NULL; the Drama membership (student_id 99, no such student) gets student = NULL.",
+      "Use `ORDER BY student NULLS LAST, club NULLS LAST` so the NULL-bearing orphan rows sort to the bottom deterministically."
+    ],
+    "orderMatters": true,
+    "approaches": [
+      {
+        "name": "FULL OUTER JOIN",
+        "sql": "SELECT s.name AS student, m.club AS club\nFROM students s\nFULL OUTER JOIN memberships m ON m.student_id = s.id\nORDER BY student NULLS LAST, club NULLS LAST;",
+        "explanation": "**Step 1 — keep both sides whole.** `students s FULL OUTER JOIN memberships m ON m.student_id = s.id` returns three kinds of rows: (a) matched pairs (Mia↔Chess, Mia↔Art, Olivia↔Robotics), (b) left-only rows for students with no membership (Noah → club NULL), and (c) right-only rows for memberships with no matching student (Drama, student_id 99 → student NULL).\n\n**Step 2 — read the NULLs.** A `NULL` in `club` means \"this student joined nothing\"; a `NULL` in `student` means \"this membership references a student who isn't in the table.\" A FULL OUTER JOIN is the one join that exposes *both* anomalies in a single query.\n\n**Step 3 — deterministic ordering.** Sorting by NULL-bearing columns is ambiguous unless you pin where NULLs go. `ORDER BY student NULLS LAST, club NULLS LAST` sends the orphan rows to the bottom and, among real students, sorts by name then club — giving Mia/Art, Mia/Chess, Olivia/Robotics, then Noah/NULL, then NULL/Drama.\n\n**Step 4 — order within a student.** Mia has two clubs; `club NULLS LAST` (ascending) orders them Art before Chess."
+      },
+      {
+        "name": "LEFT JOIN UNION right-only rows",
+        "sql": "SELECT s.name AS student, m.club AS club\nFROM students s\nLEFT JOIN memberships m ON m.student_id = s.id\nUNION ALL\nSELECT NULL AS student, m.club AS club\nFROM memberships m\nWHERE NOT EXISTS (SELECT 1 FROM students s WHERE s.id = m.student_id)\nORDER BY student NULLS LAST, club NULLS LAST;",
+        "explanation": "**Step 1 — the left half.** A `LEFT JOIN` from `students` already yields all matched pairs plus the left-only orphans (Noah with club NULL). What it *misses* are right-only rows: memberships with no matching student.\n\n**Step 2 — add the right-only orphans.** The second `SELECT` scans `memberships` and, via `NOT EXISTS`, keeps only those whose `student_id` has no student — the Drama row — emitting `NULL` for `student`. `UNION ALL` stacks these onto the left half.\n\n**Step 3 — equivalence.** LEFT-side rows + right-only orphans = exactly the FULL OUTER JOIN's output, which is precisely how a FULL OUTER JOIN is defined. This is the portable recipe for engines that lack `FULL OUTER JOIN`.\n\n**Step 4 — same ordering.** The identical `ORDER BY student NULLS LAST, club NULLS LAST` produces the same row order as the FULL OUTER JOIN approach."
+      }
+    ]
+  },
+  {
+    "slug": "coworker-pairs-in-same-department",
+    "title": "Coworker Pairs in the Same Department",
+    "difficulty": "Hard",
+    "category": "Joins",
+    "concepts": ["self-join", "pair generation", "deduplicate A-B/B-A"],
+    "description": "Finding **pairs** that share a property is a self-join classic. The gotcha is avoiding two kinds of junk: pairing a person with themselves, and listing each pair twice (A-B *and* B-A).\n\n**Task:** find every pair of **distinct** employees who work in the **same** department, listing each unordered pair **once**. Use the `name < name` trick to keep only one ordering of each pair and to drop self-pairs in a single condition.\n\nOutput columns, in this exact order: `employee_a`, `employee_b`, `dept`. Order by `dept` ascending, then `employee_a` ascending, then `employee_b` ascending.",
+    "setupSql": "CREATE TABLE employees (id INTEGER, name TEXT, dept TEXT);\nINSERT INTO employees VALUES\n  (1, 'Ana', 'Eng'),\n  (2, 'Bo', 'Eng'),\n  (3, 'Cy', 'Eng'),\n  (4, 'Di', 'Sales'),\n  (5, 'Ed', 'Sales'),\n  (6, 'Fi', 'HR');",
+    "starterSql": "SELECT a.name AS employee_a, b.name AS employee_b, a.dept AS dept\nFROM employees a\nJOIN employees b ON a.dept = b.dept AND a.name < b.name\nORDER BY dept, employee_a, employee_b;",
+    "hints": [
+      "Self-join `employees a` to `employees b` on `a.dept = b.dept`.",
+      "Add `a.name < b.name` to the ON clause: `<` is strict so it removes self-pairs (Ana-Ana) and keeps only one of Ana-Bo / Bo-Ana.",
+      "Fi is alone in HR, so HR contributes no pairs — that's correct."
+    ],
+    "orderMatters": true,
+    "approaches": [
+      {
+        "name": "Self-join with name < name",
+        "sql": "SELECT a.name AS employee_a, b.name AS employee_b, a.dept AS dept\nFROM employees a\nJOIN employees b ON a.dept = b.dept AND a.name < b.name\nORDER BY dept, employee_a, employee_b;",
+        "explanation": "**Step 1 — pair people via a self-join.** `employees a JOIN employees b ON a.dept = b.dept` matches every employee with every employee in the same department — including themselves and including both orderings of each pair.\n\n**Step 2 — the `a.name < b.name` fix does double duty.** Adding `AND a.name < b.name` to the ON clause (1) removes self-pairs, since a name is never strictly less than itself, and (2) keeps only the ordering where the first name sorts before the second, so Ana-Bo survives but Bo-Ana is discarded. One strict inequality eliminates both classes of duplicate.\n\n**Step 3 — walk the data.** Eng has Ana, Bo, Cy → the three pairs Ana-Bo, Ana-Cy, Bo-Cy. Sales has Di, Ed → Di-Ed. HR has only Fi, so no pair forms (correct — you can't pair someone with nobody).\n\n**Step 4 — order.** `ORDER BY dept, employee_a, employee_b` lists Eng's pairs first (alphabetically), then Sales, giving a fully deterministic ordering."
+      },
+      {
+        "name": "Self-join with id < id",
+        "sql": "SELECT a.name AS employee_a, b.name AS employee_b, a.dept AS dept\nFROM employees a\nJOIN employees b ON a.dept = b.dept AND a.id < b.id\nORDER BY dept, employee_a, employee_b;",
+        "explanation": "**Step 1 — same idea, dedupe on the key.** Instead of comparing names, `a.id < b.id` keeps one ordering of each pair using the primary key. This is the more robust choice in general because ids are unique even when two employees share a name.\n\n**Step 2 — why the result is identical here.** In this dataset each department's members happen to be inserted in the same alphabetical order as their names (Ana id 1 < Bo id 2 < Cy id 3, Di id 4 < Ed id 5), so ordering pairs by id yields the same `employee_a`/`employee_b` assignment as ordering by name. The final `ORDER BY dept, employee_a, employee_b` then produces the exact same rows in the exact same order as the name-based approach.\n\n**Step 3 — takeaway.** Either `<` predicate solves the self-pair and A-B/B-A duplication problem; pick `id < id` when names may collide, `name < name` when you specifically want the pair ordered alphabetically."
+      }
+    ]
+  }
+]

@@ -1,23 +1,49 @@
 export type Difficulty = "Easy" | "Medium" | "Hard";
 
 export type Category =
-  | "Recursive CTEs"
+  | "Joins"
+  | "Aggregation"
+  | "Subqueries"
+  | "Set Operations"
   | "CTEs"
+  | "Recursive CTEs"
   | "Window Functions"
   | "Ranking"
+  | "Pivoting"
+  | "Dates & Time"
+  | "String Manipulation"
+  | "NULL Handling"
   | "Advanced Filtering"
   | "Ordering";
 
 export const CATEGORIES: Category[] = [
-  "Recursive CTEs",
+  "Joins",
+  "Aggregation",
+  "Subqueries",
+  "Set Operations",
   "CTEs",
+  "Recursive CTEs",
   "Window Functions",
   "Ranking",
+  "Pivoting",
+  "Dates & Time",
+  "String Manipulation",
+  "NULL Handling",
   "Advanced Filtering",
   "Ordering",
 ];
 
 export const DIFFICULTIES: Difficulty[] = ["Easy", "Medium", "Hard"];
+
+/** A worked solution: code plus a step-by-step explanation (markdown). */
+export interface SolutionApproach {
+  /** short label, e.g. "Window function (DENSE_RANK)" */
+  name: string;
+  /** runnable SQL — must return the same result set as the grading oracle */
+  sql: string;
+  /** markdown walkthrough of how/why this query works */
+  explanation: string;
+}
 
 export interface Problem {
   /** url-safe unique id */
@@ -33,7 +59,7 @@ export interface Problem {
   description: string;
   /** DDL + seed data executed into a fresh in-memory db before the user query */
   setupSql: string;
-  /** canonical correct query — also used to compute the expected result set */
+  /** canonical correct query — used to compute the expected result set */
   solutionSql: string;
   /** prefilled into the editor */
   starterSql: string;
@@ -43,6 +69,12 @@ export interface Problem {
    */
   orderMatters: boolean;
   hints?: string[];
+  /**
+   * One or more worked solutions shown under the Solution tab. Always present
+   * at runtime (the index backfills it from `solutionSql` if a problem omits
+   * it). The first approach should match `solutionSql`.
+   */
+  approaches?: SolutionApproach[];
 }
 
 export interface QueryResult {

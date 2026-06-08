@@ -15,8 +15,72 @@ import { ResultGrid } from "./ResultGrid";
 import { Markdown } from "./Markdown";
 import { difficultyColor, categoryClasses } from "@/lib/ui";
 
-type LeftTab = "description" | "schema" | "hints";
+type LeftTab = "description" | "schema" | "solution" | "hints";
 type BottomTab = "result" | "verdict";
+
+function SchemaTables({ schema }: { schema: TableSchema[] | null }) {
+  if (schema === null)
+    return <div className="text-sm text-[var(--muted)]">Loading schema…</div>;
+  if (schema.length === 0)
+    return <div className="text-sm text-[var(--muted)]">No tables.</div>;
+  return (
+    <div className="space-y-5">
+      {schema.map((t) => (
+        <div key={t.name}>
+          <div className="mb-2 flex flex-wrap items-baseline gap-2">
+            <span className="font-mono text-sm font-semibold text-[var(--accent)]">
+              {t.name}
+            </span>
+            <span className="text-xs text-[var(--muted)]">
+              ({t.columns.map((c) => `${c.name} ${c.type}`).join(", ")})
+            </span>
+          </div>
+          <div className="overflow-hidden rounded-lg border border-[var(--border)]">
+            <ResultGrid result={t.sample} emptyLabel="empty table" />
+          </div>
+        </div>
+      ))}
+      <p className="text-xs text-[var(--muted)]">
+        Showing up to 5 sample rows per table.
+      </p>
+    </div>
+  );
+}
+
+function CodeBlock({
+  sql,
+  onLoad,
+}: {
+  sql: string;
+  onLoad: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="relative">
+      <pre className="overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--panel-2)] p-3 font-mono text-[13px] leading-relaxed text-[var(--text)]">
+        {sql}
+      </pre>
+      <div className="mt-1.5 flex gap-2">
+        <button
+          onClick={onLoad}
+          className="rounded-md border border-[var(--border)] px-2 py-1 text-xs text-[var(--muted)] hover:border-[var(--accent)] hover:text-white"
+        >
+          Load into editor
+        </button>
+        <button
+          onClick={() => {
+            navigator.clipboard?.writeText(sql);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1200);
+          }}
+          className="rounded-md border border-[var(--border)] px-2 py-1 text-xs text-[var(--muted)] hover:border-[var(--accent)] hover:text-white"
+        >
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export function ProblemView({
   problem,
@@ -38,6 +102,9 @@ export function ProblemView({
   const [verdict, setVerdict] = useState<CheckResult | null>(null);
   const [busy, setBusy] = useState<"run" | "submit" | null>(null);
   const [revealedHints, setRevealedHints] = useState(0);
+  const [solutionRevealed, setSolutionRevealed] = useState(false);
+
+  const approaches = problem.approaches ?? [];
 
   // restore any saved draft
   useEffect(() => {
@@ -126,22 +193,24 @@ export function ProblemView({
 
   return (
     <div className="flex h-full min-h-0 flex-col lg:flex-row">
-      {/* ---------------- Left: prompt / schema / hints ---------------- */}
-      <section className="flex min-h-0 flex-col border-b border-[var(--border)] lg:w-[42%] lg:max-w-[620px] lg:border-r lg:border-b-0">
+      {/* ---------------- Left: prompt / schema / solution / hints ---------------- */}
+      <section className="flex min-h-0 flex-col border-b border-[var(--border)] lg:w-[42%] lg:max-w-[640px] lg:border-r lg:border-b-0">
         <div className="flex items-center gap-1 border-b border-[var(--border)] bg-[var(--panel)] px-3">
-          {(["description", "schema", "hints"] as LeftTab[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => setLeftTab(t)}
-              className={`px-3 py-2.5 text-sm capitalize transition-colors ${
-                leftTab === t
-                  ? "border-b-2 border-[var(--accent)] text-white"
-                  : "text-[var(--muted)] hover:text-white"
-              }`}
-            >
-              {t}
-            </button>
-          ))}
+          {(["description", "schema", "solution", "hints"] as LeftTab[]).map(
+            (t) => (
+              <button
+                key={t}
+                onClick={() => setLeftTab(t)}
+                className={`px-3 py-2.5 text-sm capitalize transition-colors ${
+                  leftTab === t
+                    ? "border-b-2 border-[var(--accent)] text-white"
+                    : "text-[var(--muted)] hover:text-white"
+                }`}
+              >
+                {t}
+              </button>
+            ),
+          )}
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto px-5 py-5">
@@ -173,32 +242,68 @@ export function ProblemView({
                 ))}
               </div>
               <Markdown>{problem.description}</Markdown>
+
+              {/* inline schema preview so you don't have to switch tabs */}
+              <div className="mt-6 border-t border-[var(--border)] pt-4">
+                <div className="mb-3 text-xs font-semibold tracking-wide text-[var(--muted)] uppercase">
+                  Tables
+                </div>
+                <SchemaTables schema={schema} />
+              </div>
             </div>
           )}
 
-          {leftTab === "schema" && (
-            <div className="space-y-5">
-              {schema === null && (
-                <div className="text-sm text-[var(--muted)]">Loading schema…</div>
-              )}
-              {schema?.map((t) => (
-                <div key={t.name}>
-                  <div className="mb-2 flex items-baseline gap-2">
-                    <span className="font-mono text-sm font-semibold text-[var(--accent)]">
-                      {t.name}
-                    </span>
-                    <span className="text-xs text-[var(--muted)]">
-                      ({t.columns.map((c) => `${c.name} ${c.type}`).join(", ")})
-                    </span>
-                  </div>
-                  <div className="overflow-hidden rounded-lg border border-[var(--border)]">
-                    <ResultGrid result={t.sample} emptyLabel="empty table" />
-                  </div>
+          {leftTab === "schema" && <SchemaTables schema={schema} />}
+
+          {leftTab === "solution" && (
+            <div>
+              {!solutionRevealed ? (
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--panel-2)] px-4 py-6 text-center">
+                  <p className="mb-1 text-sm text-white">Solution hidden</p>
+                  <p className="mb-4 text-sm text-[var(--muted)]">
+                    Try it yourself first — then reveal{" "}
+                    {approaches.length > 1
+                      ? `${approaches.length} approaches`
+                      : "the approach"}{" "}
+                    with full code and a step-by-step walkthrough.
+                  </p>
+                  <button
+                    onClick={() => setSolutionRevealed(true)}
+                    className="rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[#06281d] hover:bg-emerald-300"
+                  >
+                    Reveal solution
+                  </button>
                 </div>
-              ))}
-              <p className="text-xs text-[var(--muted)]">
-                Showing up to 5 sample rows per table.
-              </p>
+              ) : (
+                <div className="space-y-8">
+                  {approaches.map((a, i) => (
+                    <div key={i}>
+                      <div className="mb-2 flex flex-wrap items-center gap-2">
+                        {approaches.length > 1 && (
+                          <span className="rounded-full bg-[var(--accent-dim)] px-2 py-0.5 text-xs font-semibold text-[var(--accent)]">
+                            Approach {i + 1}
+                          </span>
+                        )}
+                        <span className="text-sm font-semibold text-white">
+                          {a.name}
+                        </span>
+                      </div>
+                      <CodeBlock sql={a.sql} onLoad={() => setSqlText(a.sql)} />
+                      {a.explanation && (
+                        <div className="mt-3">
+                          <Markdown>{a.explanation}</Markdown>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  <button
+                    onClick={() => setSolutionRevealed(false)}
+                    className="text-xs text-[var(--muted)] hover:text-white"
+                  >
+                    Hide solution
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

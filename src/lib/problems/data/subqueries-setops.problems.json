@@ -1,0 +1,366 @@
+[
+  {
+    "slug": "order-count-per-customer-scalar",
+    "title": "Order Count Per Customer (Scalar Subquery)",
+    "difficulty": "Easy",
+    "category": "Subqueries",
+    "concepts": ["scalar subquery", "subquery in SELECT", "correlated subquery"],
+    "description": "A **scalar subquery** is a subquery that returns exactly one row and one column, so it can stand in wherever a single value is expected — including the `SELECT` list. When it references the outer row (here `c.id`) it is also *correlated*: it re-runs once per outer row.\n\n**Task:** for every customer, return their name and how many orders they have placed.\n\nReturn columns **`name`**, **`order_count`**. Order by `name` ascending.",
+    "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers (id, name) VALUES\n  (1, 'Ada'),\n  (2, 'Bea'),\n  (3, 'Cleo'),\n  (4, 'Dev');\n\nCREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER);\nINSERT INTO orders (id, customer_id, amount) VALUES\n  (1, 1, 50),\n  (2, 1, 90),\n  (3, 2, 30),\n  (4, 4, 10),\n  (5, 4, 20),\n  (6, 4, 70);",
+    "starterSql": "-- For each customer, count their orders with a scalar subquery in SELECT\nSELECT\n  c.name AS name,\n  /* scalar subquery here */ AS order_count\nFROM customers c\nORDER BY c.name;\n",
+    "orderMatters": true,
+    "hints": [
+      "Put a subquery in the SELECT list: (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id).",
+      "Because the subquery mentions c.id from the outer query, it is correlated and runs once per customer.",
+      "Customers with no orders (Cleo) correctly get 0, since COUNT(*) over an empty match is 0."
+    ],
+    "approaches": [
+      {
+        "name": "Correlated scalar subquery in SELECT",
+        "sql": "SELECT\n  c.name AS name,\n  (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id) AS order_count\nFROM customers c\nORDER BY c.name;",
+        "explanation": "1. We start from `customers` so that every customer appears once, even ones with zero orders.\n2. For each customer row, the **scalar subquery** `(SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id)` runs. It is *correlated* because it references `c.id` from the outer query, so it effectively re-executes for each customer.\n3. `COUNT(*)` over the matching orders returns a single number — a scalar — which is exactly what the `SELECT` list needs.\n4. Cleo has no matching orders, so her subquery returns `0` (not NULL): counting zero rows yields zero.\n5. `ORDER BY c.name` gives the deterministic alphabetical order the prompt asks for."
+      },
+      {
+        "name": "LEFT JOIN + GROUP BY",
+        "sql": "SELECT\n  c.name AS name,\n  COUNT(o.id) AS order_count\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.id\nGROUP BY c.id, c.name\nORDER BY c.name;",
+        "explanation": "1. A `LEFT JOIN` keeps every customer, attaching their order rows (or a single all-NULL row when they have none).\n2. `GROUP BY c.id, c.name` collapses back to one row per customer.\n3. `COUNT(o.id)` counts non-NULL order ids, so a customer with no orders counts `0` — matching the scalar-subquery version exactly.\n4. This produces the same `name`/`order_count` pairs; it is the set-based alternative to running a per-row subquery."
+      }
+    ]
+  },
+  {
+    "slug": "products-priced-above-category-avg",
+    "title": "Products Priced Above Their Category Average",
+    "difficulty": "Medium",
+    "category": "Subqueries",
+    "concepts": ["correlated subquery", "subquery in WHERE", "AVG"],
+    "description": "A **correlated subquery in `WHERE`** lets each outer row be tested against a value computed from rows related to it — here, the average price *within the same category*.\n\n**Task:** return the products whose `price` is **strictly greater** than the average price of all products in the *same* `category`.\n\nReturn columns **`name`**, **`category`**, **`price`**. Order by `category` ascending, then `name` ascending.",
+    "setupSql": "CREATE TABLE products (id INTEGER, name TEXT, category TEXT, price INTEGER);\nINSERT INTO products (id, name, category, price) VALUES\n  (1, 'Pen',     'Office', 2),\n  (2, 'Stapler', 'Office', 8),\n  (3, 'Desk',    'Office', 200),\n  (4, 'Apple',   'Food',   1),\n  (5, 'Steak',   'Food',   15),\n  (6, 'Bread',   'Food',   3),\n  (7, 'Tea',     'Food',   5);",
+    "starterSql": "-- Keep products above their own category's average price\nSELECT name, category, price\nFROM products p\nWHERE price > (\n  -- correlated average over the same category\n)\nORDER BY category, name;\n",
+    "orderMatters": true,
+    "hints": [
+      "The inner query must filter on the same category as the outer row: WHERE q.category = p.category.",
+      "Use a strict '>' so a product equal to the average is excluded.",
+      "The subquery returns one number (the category average), so it compares directly against price."
+    ],
+    "approaches": [
+      {
+        "name": "Correlated subquery in WHERE",
+        "sql": "SELECT p.name AS name, p.category AS category, p.price AS price\nFROM products p\nWHERE p.price > (\n  SELECT AVG(q.price)\n  FROM products q\n  WHERE q.category = p.category\n)\nORDER BY p.category, p.name;",
+        "explanation": "1. For each product `p`, the **correlated subquery** computes `AVG(q.price)` over every product `q` *in the same category* (`q.category = p.category`).\n2. That average is a single scalar, so `p.price > (...)` is a normal numeric comparison.\n3. Office averages (2+8+200)/3 = 70, so only Desk (200) survives. Food averages (1+15+3+5)/4 = 6, so only Steak (15) survives.\n4. The strict `>` drops any product exactly at its category average.\n5. `ORDER BY p.category, p.name` gives a deterministic total order."
+      },
+      {
+        "name": "Derived per-category averages, then JOIN",
+        "sql": "SELECT p.name AS name, p.category AS category, p.price AS price\nFROM products p\nJOIN (\n  SELECT category, AVG(price) AS avg_price\n  FROM products\n  GROUP BY category\n) a ON a.category = p.category\nWHERE p.price > a.avg_price\nORDER BY p.category, p.name;",
+        "explanation": "1. The derived table `a` computes each category's average price **once** with `GROUP BY`.\n2. We `JOIN` it back to products on `category`, attaching the right average to every product.\n3. `WHERE p.price > a.avg_price` keeps only the above-average products — identical logic to the correlated version, but the averages are computed a single time rather than per row.\n4. Same rows result: Desk and Steak."
+      }
+    ]
+  },
+  {
+    "slug": "customers-with-big-orders-in-vs-exists",
+    "title": "Customers With a Big Order (IN vs EXISTS)",
+    "difficulty": "Medium",
+    "category": "Subqueries",
+    "concepts": ["IN", "EXISTS", "semi-join", "correlated subquery"],
+    "description": "`IN (subquery)` and `EXISTS (correlated subquery)` are two ways to write the same **semi-join** — \"keep an outer row if a related row exists\". Both are shown below as separate, verified-equal approaches.\n\n**Task:** return the names of customers who have placed **at least one** order of `amount` greater than 100.\n\nReturn a single column **`name`**. Order by `name` ascending.",
+    "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers (id, name) VALUES\n  (1, 'Ada'),\n  (2, 'Bea'),\n  (3, 'Cleo'),\n  (4, 'Dev');\n\nCREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER);\nINSERT INTO orders (id, customer_id, amount) VALUES\n  (1, 1, 150),\n  (2, 1, 40),\n  (3, 2, 90),\n  (4, 3, 500),\n  (5, 3, 120),\n  (6, 4, 10);",
+    "starterSql": "-- Customers with any order over 100 — try it with IN, then with EXISTS\nSELECT name\nFROM customers c\nWHERE c.id IN (\n  -- ids of customers having a big order\n)\nORDER BY name;\n",
+    "orderMatters": true,
+    "hints": [
+      "IN version: SELECT customer_id FROM orders WHERE amount > 100, then keep customers whose id is in that list.",
+      "EXISTS version: correlate on o.customer_id = c.id and require amount > 100.",
+      "Both are semi-joins: a customer appears at most once even if they have several big orders (Cleo has two)."
+    ],
+    "approaches": [
+      {
+        "name": "IN (uncorrelated subquery)",
+        "sql": "SELECT c.name AS name\nFROM customers c\nWHERE c.id IN (\n  SELECT o.customer_id\n  FROM orders o\n  WHERE o.amount > 100\n)\nORDER BY c.name;",
+        "explanation": "1. The inner query lists the `customer_id`s of every order over 100 — this set is computed **once** (it does not depend on the outer row, so it is *uncorrelated*).\n2. `c.id IN (...)` keeps a customer if their id appears anywhere in that set.\n3. Because `IN` tests membership, a customer is returned **at most once** even if they have multiple big orders — Cleo's two big orders still yield a single `Cleo` row.\n4. Result: Ada (150) and Cleo (500, 120). `ORDER BY c.name` makes the output deterministic."
+      },
+      {
+        "name": "EXISTS (correlated subquery)",
+        "sql": "SELECT c.name AS name\nFROM customers c\nWHERE EXISTS (\n  SELECT 1\n  FROM orders o\n  WHERE o.customer_id = c.id\n    AND o.amount > 100\n)\nORDER BY c.name;",
+        "explanation": "1. For each customer `c`, the **correlated** subquery looks for *any* order with `o.customer_id = c.id AND o.amount > 100`.\n2. `EXISTS` is true as soon as one such row is found and stops looking — the `SELECT 1` is a convention emphasising we only care whether a row exists, not its values.\n3. This is the same semi-join as the `IN` version: each qualifying customer appears exactly once.\n4. Result is identical — Ada and Cleo — proving `IN` and `EXISTS` are equivalent rewrites here."
+      }
+    ]
+  },
+  {
+    "slug": "high-value-orders-derived-table",
+    "title": "Top Spenders via a Derived Table",
+    "difficulty": "Medium",
+    "category": "Subqueries",
+    "concepts": ["derived table", "subquery in FROM", "GROUP BY", "HAVING"],
+    "description": "A **derived table** is a subquery in the `FROM` clause that you treat like a temporary table. It is handy when you must aggregate first and then filter or join on the aggregate.\n\n**Task:** using a derived table that totals each customer's spend, return the customers whose **total** spend is at least 100.\n\nReturn columns **`name`**, **`total_spent`**. Order by `total_spent` descending, then `name` ascending.",
+    "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers (id, name) VALUES\n  (1, 'Ada'),\n  (2, 'Bea'),\n  (3, 'Cleo'),\n  (4, 'Dev');\n\nCREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER);\nINSERT INTO orders (id, customer_id, amount) VALUES\n  (1, 1, 60),\n  (2, 1, 60),\n  (3, 2, 30),\n  (4, 3, 100),\n  (5, 3, 25),\n  (6, 4, 99);",
+    "starterSql": "-- Aggregate spend in a derived table, then filter on the total\nSELECT t.name AS name, t.total_spent AS total_spent\nFROM (\n  -- derived table: customer_id, name, SUM(amount)\n) t\nWHERE t.total_spent >= 100\nORDER BY t.total_spent DESC, t.name;\n",
+    "orderMatters": true,
+    "hints": [
+      "Build the derived table by joining orders to customers and SUM(amount) grouped per customer.",
+      "Give the subquery an alias (here t) so the outer query can reference its columns.",
+      "Filter on the aggregated column in the outer WHERE, not inside the derived table."
+    ],
+    "approaches": [
+      {
+        "name": "Subquery in FROM (derived table)",
+        "sql": "SELECT t.name AS name, t.total_spent AS total_spent\nFROM (\n  SELECT c.name AS name, SUM(o.amount) AS total_spent\n  FROM customers c\n  JOIN orders o ON o.customer_id = c.id\n  GROUP BY c.id, c.name\n) t\nWHERE t.total_spent >= 100\nORDER BY t.total_spent DESC, t.name;",
+        "explanation": "1. The subquery in `FROM` — the **derived table** `t` — joins customers to orders and computes `SUM(o.amount)` per customer.\n2. The derived table must be aliased (`t`) so the outer query can refer to its output columns `name` and `total_spent`.\n3. The outer `WHERE t.total_spent >= 100` filters on the aggregate. (You couldn't write this in the inner `WHERE` because the sum isn't known until after grouping.)\n4. Totals: Ada 120, Cleo 125, Bea 30, Dev 99. Only Ada and Cleo clear 100.\n5. `ORDER BY t.total_spent DESC, t.name` gives a deterministic total order (Cleo 125, then Ada 120)."
+      },
+      {
+        "name": "GROUP BY + HAVING (no derived table)",
+        "sql": "SELECT c.name AS name, SUM(o.amount) AS total_spent\nFROM customers c\nJOIN orders o ON o.customer_id = c.id\nGROUP BY c.id, c.name\nHAVING SUM(o.amount) >= 100\nORDER BY total_spent DESC, c.name;",
+        "explanation": "1. The same aggregation done in one level: `GROUP BY` per customer with `SUM(o.amount)`.\n2. `HAVING SUM(o.amount) >= 100` filters the aggregated groups — `HAVING` is the post-aggregation counterpart to `WHERE`.\n3. This avoids the explicit derived table but yields the identical rows: Cleo 125, Ada 120.\n4. It shows the derived-table approach and `HAVING` are interchangeable here; the derived table is preferable when you also need to join the aggregate to something else."
+      }
+    ]
+  },
+  {
+    "slug": "most-expensive-order-per-customer",
+    "title": "Each Customer's Most Expensive Order",
+    "difficulty": "Hard",
+    "category": "Subqueries",
+    "concepts": ["greatest-n-per-group", "correlated subquery", "MAX"],
+    "description": "**Greatest-n-per-group** asks for the top row within each group. A classic approach keeps a row only when no other row in its group beats it — expressed with a *correlated subquery*.\n\n**Task:** return each customer's single most expensive order. The data is built so each customer's maximum amount is unique (no ties), giving exactly one row per customer.\n\nReturn columns **`customer`**, **`order_id`**, **`amount`**. Order by `customer` ascending.",
+    "setupSql": "CREATE TABLE orders (order_id INTEGER, customer TEXT, amount INTEGER);\nINSERT INTO orders (order_id, customer, amount) VALUES\n  (1, 'Ada',  50),\n  (2, 'Ada',  90),\n  (3, 'Ada',  20),\n  (4, 'Bea',  70),\n  (5, 'Bea',  65),\n  (6, 'Cleo', 30),\n  (7, 'Cleo', 200),\n  (8, 'Cleo', 199);",
+    "starterSql": "-- One row per customer: their highest-amount order\nSELECT o.customer AS customer, o.order_id AS order_id, o.amount AS amount\nFROM orders o\nWHERE o.amount = (\n  -- the max amount for THIS customer\n)\nORDER BY o.customer;\n",
+    "orderMatters": true,
+    "hints": [
+      "Correlate the inner MAX on the same customer: WHERE i.customer = o.customer.",
+      "Keep the outer row whose amount equals that per-customer maximum.",
+      "Because each customer's max amount is unique here, exactly one order per customer qualifies."
+    ],
+    "approaches": [
+      {
+        "name": "Correlated subquery matching the per-group MAX",
+        "sql": "SELECT o.customer AS customer, o.order_id AS order_id, o.amount AS amount\nFROM orders o\nWHERE o.amount = (\n  SELECT MAX(i.amount)\n  FROM orders i\n  WHERE i.customer = o.customer\n)\nORDER BY o.customer;",
+        "explanation": "1. For each order `o`, the **correlated subquery** computes `MAX(i.amount)` over orders belonging to the *same* customer (`i.customer = o.customer`).\n2. The outer `WHERE o.amount = (...)` keeps an order only if its amount equals that customer's maximum.\n3. This is the greatest-n-per-group pattern: a row survives exactly when nothing in its group beats it.\n4. The seed data makes each customer's top amount unique (Ada 90, Bea 70, Cleo 200), so precisely one order per customer is returned — no tie duplicates.\n5. `ORDER BY o.customer` gives the deterministic order."
+      },
+      {
+        "name": "Anti-pattern style: NOT EXISTS a bigger order",
+        "sql": "SELECT o.customer AS customer, o.order_id AS order_id, o.amount AS amount\nFROM orders o\nWHERE NOT EXISTS (\n  SELECT 1\n  FROM orders b\n  WHERE b.customer = o.customer\n    AND b.amount > o.amount\n)\nORDER BY o.customer;",
+        "explanation": "1. This reads the requirement directly: keep order `o` if **no** order `b` for the same customer has a strictly larger amount.\n2. `NOT EXISTS (... b.amount > o.amount)` is true exactly for the group's maximum row.\n3. Equivalent to comparing against `MAX`, but phrased as an anti-join. With unique per-customer maxima, it returns the identical single row per customer.\n4. Same result as the MAX approach — Ada 90, Bea 70, Cleo 200."
+      }
+    ]
+  },
+  {
+    "slug": "departments-avg-salary-having-subquery",
+    "title": "Departments Beating the Company Average (HAVING + Subquery)",
+    "difficulty": "Hard",
+    "category": "Subqueries",
+    "concepts": ["subquery in HAVING", "AVG", "GROUP BY", "ROUND"],
+    "description": "A **subquery in `HAVING`** filters *aggregated groups* against a value computed by another query — here, the company-wide average salary.\n\n**Task:** return departments whose **average salary** is strictly greater than the **overall company average salary**.\n\nThe average salary is not necessarily an integer, so round it to 2 decimals with `ROUND(AVG(salary), 2)`.\n\nReturn columns **`dept`**, **`avg_salary`**. Order by `avg_salary` descending, then `dept` ascending.",
+    "setupSql": "CREATE TABLE employees (name TEXT, dept TEXT, salary INTEGER);\nINSERT INTO employees (name, dept, salary) VALUES\n  ('e1', 'Eng',   120),\n  ('e2', 'Eng',   100),\n  ('e3', 'Eng',   140),\n  ('e4', 'Sales', 90),\n  ('e5', 'Sales', 70),\n  ('e6', 'HR',    60),\n  ('e7', 'HR',    50),\n  ('e8', 'Ops',   110);",
+    "starterSql": "-- Departments whose average salary beats the company-wide average\nSELECT dept, ROUND(AVG(salary), 2) AS avg_salary\nFROM employees\nGROUP BY dept\nHAVING AVG(salary) > (\n  -- company-wide average salary\n)\nORDER BY avg_salary DESC, dept;\n",
+    "orderMatters": true,
+    "hints": [
+      "The company average is (SELECT AVG(salary) FROM employees) computed over every employee.",
+      "Compare each group's AVG(salary) to that scalar inside HAVING (use the unrounded value for an exact comparison).",
+      "Round only the displayed column with ROUND(AVG(salary), 2)."
+    ],
+    "approaches": [
+      {
+        "name": "Subquery inside HAVING",
+        "sql": "SELECT dept AS dept, ROUND(AVG(salary), 2) AS avg_salary\nFROM employees\nGROUP BY dept\nHAVING AVG(salary) > (SELECT AVG(salary) FROM employees)\nORDER BY avg_salary DESC, dept;",
+        "explanation": "1. `GROUP BY dept` forms one group per department; `AVG(salary)` is each department's mean.\n2. The **scalar subquery in `HAVING`**, `(SELECT AVG(salary) FROM employees)`, computes the company-wide mean: (120+100+140+90+70+60+50+110)/8 = 92.5.\n3. `HAVING AVG(salary) > 92.5` keeps only departments above that line. Eng = 120, Ops = 110 qualify; Sales = 80 and HR = 55 do not.\n4. We compare on the *unrounded* `AVG(salary)` for an exact decision, but display `ROUND(AVG(salary), 2)` because an average can have decimals.\n5. `ORDER BY avg_salary DESC, dept` gives a deterministic total order (Eng 120, Ops 110)."
+      },
+      {
+        "name": "Cross-join the scalar average, filter in WHERE",
+        "sql": "SELECT g.dept AS dept, ROUND(g.avg_salary, 2) AS avg_salary\nFROM (\n  SELECT dept, AVG(salary) AS avg_salary FROM employees GROUP BY dept\n) g\nCROSS JOIN (SELECT AVG(salary) AS company_avg FROM employees) ca\nWHERE g.avg_salary > ca.company_avg\nORDER BY avg_salary DESC, g.dept;",
+        "explanation": "1. The derived table `g` holds each department's average; `ca` holds the single company average.\n2. A `CROSS JOIN` attaches the one-row `ca` to every department row, making `company_avg` available as a normal column.\n3. `WHERE g.avg_salary > ca.company_avg` then filters — the same threshold (92.5) as the `HAVING` version.\n4. Identical result, Eng 120 and Ops 110, showing the `HAVING`-subquery can be restated as a join against a scalar."
+      }
+    ]
+  },
+  {
+    "slug": "orders-above-overall-average",
+    "title": "Orders Above the Overall Average",
+    "difficulty": "Easy",
+    "category": "Subqueries",
+    "concepts": ["comparison to scalar subquery", "AVG", "subquery in WHERE"],
+    "description": "Comparing a column to a **single value returned by a subquery** is one of the most common subquery patterns. The subquery runs once and produces a scalar threshold.\n\n**Task:** return the orders whose `amount` is **strictly greater** than the average amount across *all* orders.\n\nReturn columns **`order_id`**, **`amount`**. Order by `amount` descending, then `order_id` ascending.",
+    "setupSql": "CREATE TABLE orders (order_id INTEGER, amount INTEGER);\nINSERT INTO orders (order_id, amount) VALUES\n  (1, 10),\n  (2, 40),\n  (3, 25),\n  (4, 100),\n  (5, 30),\n  (6, 55);",
+    "starterSql": "-- Orders above the average amount\nSELECT order_id, amount\nFROM orders\nWHERE amount > (\n  -- average amount over all orders\n)\nORDER BY amount DESC, order_id;\n",
+    "orderMatters": true,
+    "hints": [
+      "Compute the threshold once: (SELECT AVG(amount) FROM orders).",
+      "Use strict '>' so an order exactly at the average is excluded.",
+      "The subquery is uncorrelated — it returns a single number used for every row's comparison."
+    ],
+    "approaches": [
+      {
+        "name": "Compare column to a scalar subquery",
+        "sql": "SELECT order_id AS order_id, amount AS amount\nFROM orders\nWHERE amount > (SELECT AVG(amount) FROM orders)\nORDER BY amount DESC, order_id;",
+        "explanation": "1. `(SELECT AVG(amount) FROM orders)` is an **uncorrelated scalar subquery**: it does not reference the outer row, so the database evaluates it once. The average is (10+40+25+100+30+55)/6 ≈ 43.33.\n2. `WHERE amount > 43.33` compares every order's amount to that single threshold.\n3. Strict `>` excludes anything exactly at the average; amounts 100, 55 pass (40, 30, 25, 10 do not).\n4. `ORDER BY amount DESC, order_id` gives a deterministic total order (100 then 55)."
+      },
+      {
+        "name": "Cross join the average as a column",
+        "sql": "SELECT o.order_id AS order_id, o.amount AS amount\nFROM orders o, (SELECT AVG(amount) AS avg_amount FROM orders) a\nWHERE o.amount > a.avg_amount\nORDER BY o.amount DESC, o.order_id;",
+        "explanation": "1. The comma-join (an implicit `CROSS JOIN`) pairs every order with the one-row average table `a`.\n2. Now `a.avg_amount` is a plain column on each row, so the filter `o.amount > a.avg_amount` reads naturally.\n3. This is exactly the same threshold comparison as the scalar-subquery form and returns the identical rows (100, 55)."
+      }
+    ]
+  },
+  {
+    "slug": "books-by-prolific-authors",
+    "title": "Books by Prolific Authors (Uncorrelated Subquery Filter)",
+    "difficulty": "Medium",
+    "category": "Subqueries",
+    "concepts": ["uncorrelated subquery", "IN", "GROUP BY", "HAVING"],
+    "description": "An **uncorrelated subquery** computes a fixed set of values once, independent of the outer query, and that set then feeds a filter. Here we first find the *prolific* authors, then list all their books.\n\n**Task:** an author is **prolific** if they have written **2 or more** books. Return every book written by a prolific author.\n\nReturn columns **`title`**, **`author`**. Order by `author` ascending, then `title` ascending.",
+    "setupSql": "CREATE TABLE books (id INTEGER, title TEXT, author TEXT);\nINSERT INTO books (id, title, author) VALUES\n  (1, 'A Tale',    'Dickens'),\n  (2, 'Great Exp', 'Dickens'),\n  (3, 'Oliver',    'Dickens'),\n  (4, 'Emma',      'Austen'),\n  (5, 'Persuasion','Austen'),\n  (6, 'Frankenst', 'Shelley'),\n  (7, 'Dracula',   'Stoker');",
+    "starterSql": "-- List all books whose author wrote 2+ books\nSELECT title, author\nFROM books\nWHERE author IN (\n  -- authors having 2 or more books\n)\nORDER BY author, title;\n",
+    "orderMatters": true,
+    "hints": [
+      "Build the prolific-author set with GROUP BY author HAVING COUNT(*) >= 2.",
+      "Feed that set into WHERE author IN (...). The subquery is uncorrelated — computed once.",
+      "Then every book by those authors is returned, not just one per author."
+    ],
+    "approaches": [
+      {
+        "name": "IN over an uncorrelated GROUP BY/HAVING subquery",
+        "sql": "SELECT title AS title, author AS author\nFROM books\nWHERE author IN (\n  SELECT author\n  FROM books\n  GROUP BY author\n  HAVING COUNT(*) >= 2\n)\nORDER BY author, title;",
+        "explanation": "1. The inner query is **uncorrelated**: `GROUP BY author HAVING COUNT(*) >= 2` returns the prolific authors (Dickens with 3 books, Austen with 2). It is computed once, on its own.\n2. The outer `WHERE author IN (...)` keeps every book whose author is in that set.\n3. Because we filter on author membership (not aggregate the outer query), *all* books by prolific authors appear — Dickens' three and Austen's two.\n4. Shelley and Stoker have only one book each, so their titles are excluded.\n5. `ORDER BY author, title` gives a deterministic total order."
+      },
+      {
+        "name": "JOIN to the prolific-author set",
+        "sql": "SELECT b.title AS title, b.author AS author\nFROM books b\nJOIN (\n  SELECT author FROM books GROUP BY author HAVING COUNT(*) >= 2\n) p ON p.author = b.author\nORDER BY b.author, b.title;",
+        "explanation": "1. The derived table `p` is the same prolific-author set.\n2. Joining `books` to `p` on `author` keeps only books whose author qualifies — an inner join acts as a filter here because each author appears once in `p`.\n3. This returns the identical five rows as the `IN` version, demonstrating that an `IN`-filter over an uncorrelated subquery and a join to that subquery's result are equivalent."
+      }
+    ]
+  },
+  {
+    "slug": "all-active-people-union",
+    "title": "All People Across Two Tables (UNION dedupe)",
+    "difficulty": "Easy",
+    "category": "Set Operations",
+    "concepts": ["UNION", "deduplication", "ORDER BY"],
+    "description": "`UNION` stacks two result sets and **removes duplicate rows**, comparing the *whole row* across both sources. Use it when the same person/value can legitimately appear in both inputs and you want each only once.\n\n**Task:** combine the `employees` and `contractors` name lists into one **distinct** list of people.\n\nReturn a single column **`name`**. Order by `name` ascending.",
+    "setupSql": "CREATE TABLE employees (name TEXT);\nINSERT INTO employees (name) VALUES\n  ('Ada'), ('Bea'), ('Cleo');\n\nCREATE TABLE contractors (name TEXT);\nINSERT INTO contractors (name) VALUES\n  ('Bea'), ('Dev'), ('Eli');",
+    "starterSql": "-- Distinct list of everyone in either table\nSELECT name FROM employees\nUNION\nSELECT name FROM contractors\nORDER BY name;\n",
+    "orderMatters": true,
+    "hints": [
+      "UNION (not UNION ALL) removes duplicate rows automatically.",
+      "Bea appears in both tables but should show up only once.",
+      "Apply ORDER BY once, after the whole UNION, to sort the combined result."
+    ],
+    "approaches": [
+      {
+        "name": "UNION",
+        "sql": "SELECT name FROM employees\nUNION\nSELECT name FROM contractors\nORDER BY name;",
+        "explanation": "1. Each branch produces a list of names; `UNION` concatenates them and then **deduplicates** by comparing entire rows.\n2. `Bea` exists in both tables, but `UNION` collapses the two `Bea` rows into one.\n3. The final `ORDER BY name` applies to the combined, deduplicated result (a single trailing `ORDER BY` governs the whole set operation).\n4. Result: Ada, Bea, Cleo, Dev, Eli — five distinct names."
+      },
+      {
+        "name": "UNION ALL then DISTINCT",
+        "sql": "SELECT DISTINCT name\nFROM (\n  SELECT name FROM employees\n  UNION ALL\n  SELECT name FROM contractors\n)\nORDER BY name;",
+        "explanation": "1. `UNION ALL` keeps *every* row including duplicates (here two `Bea` rows), so this is the un-deduped concatenation.\n2. Wrapping it in `SELECT DISTINCT` then removes duplicates — reproducing exactly what `UNION` does internally.\n3. This makes explicit that `UNION` = `UNION ALL` + `DISTINCT`. Same five-name result."
+      }
+    ]
+  },
+  {
+    "slug": "union-all-vs-union-duplicates",
+    "title": "UNION ALL vs UNION: Counting Logins",
+    "difficulty": "Medium",
+    "category": "Set Operations",
+    "concepts": ["UNION ALL", "UNION", "duplicates", "COUNT"],
+    "description": "`UNION ALL` keeps duplicates; `UNION` removes them. The difference is observable: stack two login logs and **count** the rows each way.\n\n**Task:** report two counts in a single row — the number of rows when combining the two logs with `UNION ALL` (duplicates kept) and with `UNION` (distinct users).\n\nReturn columns **`all_count`**, **`distinct_count`**. Single row.",
+    "setupSql": "CREATE TABLE web_logins (user TEXT);\nINSERT INTO web_logins (user) VALUES\n  ('Ada'), ('Bea'), ('Ada'), ('Cleo');\n\nCREATE TABLE app_logins (user TEXT);\nINSERT INTO app_logins (user) VALUES\n  ('Bea'), ('Dev'), ('Ada');",
+    "starterSql": "-- Compare the row counts of UNION ALL vs UNION\nSELECT\n  (SELECT COUNT(*) FROM (SELECT user FROM web_logins UNION ALL SELECT user FROM app_logins)) AS all_count,\n  (SELECT COUNT(*) FROM (SELECT user FROM web_logins UNION     SELECT user FROM app_logins)) AS distinct_count;\n",
+    "orderMatters": false,
+    "hints": [
+      "Wrap each set operation in a derived table and COUNT(*) it.",
+      "UNION ALL keeps all 4 + 3 = 7 rows; UNION collapses to the distinct users.",
+      "Distinct users across both logs: Ada, Bea, Cleo, Dev = 4."
+    ],
+    "approaches": [
+      {
+        "name": "Count UNION ALL vs UNION",
+        "sql": "SELECT\n  (SELECT COUNT(*) FROM (SELECT user FROM web_logins UNION ALL SELECT user FROM app_logins)) AS all_count,\n  (SELECT COUNT(*) FROM (SELECT user FROM web_logins UNION     SELECT user FROM app_logins)) AS distinct_count;",
+        "explanation": "1. The first scalar subquery wraps a `UNION ALL` — it keeps **every** row from both logs: 4 web + 3 app = 7. `COUNT(*)` returns 7.\n2. The second wraps a `UNION` — it **deduplicates** whole rows, leaving the distinct users {Ada, Bea, Cleo, Dev} = 4.\n3. The gap (7 vs 4) is exactly the number of duplicate logins removed: Ada appears 3 times total and Bea twice.\n4. Both counts are returned as columns of a single row, directly contrasting the two operators."
+      },
+      {
+        "name": "Distinct count via COUNT(DISTINCT) on the UNION ALL",
+        "sql": "WITH combined AS (\n  SELECT user FROM web_logins\n  UNION ALL\n  SELECT user FROM app_logins\n)\nSELECT\n  (SELECT COUNT(*) FROM combined) AS all_count,\n  (SELECT COUNT(DISTINCT user) FROM combined) AS distinct_count;",
+        "explanation": "1. The CTE `combined` is the full `UNION ALL` (7 rows, duplicates intact).\n2. `COUNT(*)` over it is the `all_count` = 7.\n3. `COUNT(DISTINCT user)` collapses duplicate users — the same effect `UNION` has — giving `distinct_count` = 4.\n4. Same single-row result (7, 4), illustrating again that the only difference between the operators is duplicate handling."
+      }
+    ]
+  },
+  {
+    "slug": "customers-on-both-channels-intersect",
+    "title": "Customers Who Bought on Both Channels (INTERSECT)",
+    "difficulty": "Easy",
+    "category": "Set Operations",
+    "concepts": ["INTERSECT", "deduplication", "ORDER BY"],
+    "description": "`INTERSECT` returns only the rows present in **both** result sets, and like the other set operators it **dedupes** and compares the *entire row*.\n\n**Task:** return the customers who purchased through **both** the online store and the retail store.\n\nReturn a single column **`customer`**. Order by `customer` ascending.",
+    "setupSql": "CREATE TABLE online_buyers (customer TEXT);\nINSERT INTO online_buyers (customer) VALUES\n  ('Ada'), ('Bea'), ('Cleo'), ('Bea');\n\nCREATE TABLE retail_buyers (customer TEXT);\nINSERT INTO retail_buyers (customer) VALUES\n  ('Bea'), ('Cleo'), ('Dev');",
+    "starterSql": "-- Customers appearing in BOTH channels\nSELECT customer FROM online_buyers\nINTERSECT\nSELECT customer FROM retail_buyers\nORDER BY customer;\n",
+    "orderMatters": true,
+    "hints": [
+      "INTERSECT keeps only values found in both SELECTs.",
+      "It also removes duplicates, so Bea's repeated online row collapses to one.",
+      "Ada (online only) and Dev (retail only) are excluded."
+    ],
+    "approaches": [
+      {
+        "name": "INTERSECT",
+        "sql": "SELECT customer FROM online_buyers\nINTERSECT\nSELECT customer FROM retail_buyers\nORDER BY customer;",
+        "explanation": "1. `INTERSECT` returns rows that appear in **both** inputs. Only Bea and Cleo are in each list.\n2. Like all SQL set operators (except the `ALL` variants), `INTERSECT` **deduplicates**: the two online `Bea` rows count as one, so Bea appears a single time.\n3. The comparison is on the whole row (here the single `customer` column).\n4. Ada (online only) and Dev (retail only) are dropped.\n5. `ORDER BY customer` sorts the two-row result deterministically: Bea, Cleo."
+      },
+      {
+        "name": "EXISTS / IN equivalent",
+        "sql": "SELECT DISTINCT customer\nFROM online_buyers o\nWHERE customer IN (SELECT customer FROM retail_buyers)\nORDER BY customer;",
+        "explanation": "1. This rebuilds `INTERSECT` with a semi-join: keep an online customer only if they also appear in `retail_buyers` (`IN (...)`).\n2. `SELECT DISTINCT` reproduces the dedupe behaviour `INTERSECT` performs automatically, collapsing Bea's two rows.\n3. Same two rows result — Bea, Cleo — showing `INTERSECT` is shorthand for a deduplicated semi-join."
+      }
+    ]
+  },
+  {
+    "slug": "churned-customers-except",
+    "title": "Churned Customers (EXCEPT)",
+    "difficulty": "Medium",
+    "category": "Set Operations",
+    "concepts": ["EXCEPT", "anti-join", "deduplication"],
+    "description": "`EXCEPT` returns rows in the **first** set that are **not** in the second (\"in A but not B\"). It dedupes and compares whole rows, making it a clean way to express set difference.\n\n**Task:** a customer has *churned* if they bought **last year** but **not this year**. Return the churned customers.\n\nReturn a single column **`customer`**. Order by `customer` ascending.",
+    "setupSql": "CREATE TABLE last_year (customer TEXT);\nINSERT INTO last_year (customer) VALUES\n  ('Ada'), ('Bea'), ('Cleo'), ('Dev'), ('Bea');\n\nCREATE TABLE this_year (customer TEXT);\nINSERT INTO this_year (customer) VALUES\n  ('Bea'), ('Cleo'), ('Eli');",
+    "starterSql": "-- Bought last year but not this year\nSELECT customer FROM last_year\nEXCEPT\nSELECT customer FROM this_year\nORDER BY customer;\n",
+    "orderMatters": true,
+    "hints": [
+      "EXCEPT subtracts the second set from the first.",
+      "It dedupes, so Bea's two last_year rows collapse — but Bea is also in this_year, so she's removed anyway.",
+      "Remaining 'in A but not B': Ada and Dev."
+    ],
+    "approaches": [
+      {
+        "name": "EXCEPT",
+        "sql": "SELECT customer FROM last_year\nEXCEPT\nSELECT customer FROM this_year\nORDER BY customer;",
+        "explanation": "1. `EXCEPT` returns rows of the first query that do **not** appear in the second — the set difference A − B.\n2. It **deduplicates** the first set first: Bea's two `last_year` rows collapse to one. (She is then removed entirely because she also appears this year.)\n3. Last year's distinct set {Ada, Bea, Cleo, Dev} minus this year's {Bea, Cleo, Eli} leaves {Ada, Dev}.\n4. Note Eli is only in `this_year`; `EXCEPT` ignores rows that exist only in the second set.\n5. `ORDER BY customer` yields a deterministic order: Ada, Dev."
+      },
+      {
+        "name": "NOT EXISTS anti-join",
+        "sql": "SELECT DISTINCT l.customer\nFROM last_year l\nWHERE NOT EXISTS (\n  SELECT 1 FROM this_year t WHERE t.customer = l.customer\n)\nORDER BY l.customer;",
+        "explanation": "1. The anti-join keeps a last-year customer only when **no** matching this-year row exists (`NOT EXISTS`).\n2. `SELECT DISTINCT` mimics the dedupe that `EXCEPT` does automatically, collapsing Bea's duplicate (though Bea is filtered out regardless).\n3. Identical result — Ada, Dev — confirming `EXCEPT` is the set-operator form of an anti-join."
+      }
+    ]
+  },
+  {
+    "slug": "menu-symmetric-difference",
+    "title": "Items on Exactly One Menu (Symmetric Difference)",
+    "difficulty": "Hard",
+    "category": "Set Operations",
+    "concepts": ["symmetric difference", "EXCEPT", "UNION", "ORDER BY"],
+    "description": "The **symmetric difference** of two sets is everything in exactly one of them — `(A EXCEPT B) UNION (B EXCEPT A)`. It combines two set-difference operations with a final `UNION`, then a single `ORDER BY`.\n\n**Task:** two cafe locations each have a menu. Return the items that appear on **exactly one** menu (present at one location but not the other), tagging which side it came from.\n\nReturn columns **`item`**, **`only_at`**. Order by `item` ascending.",
+    "setupSql": "CREATE TABLE downtown_menu (item TEXT);\nINSERT INTO downtown_menu (item) VALUES\n  ('Latte'), ('Mocha'), ('Scone'), ('Bagel'), ('Latte');\n\nCREATE TABLE uptown_menu (item TEXT);\nINSERT INTO uptown_menu (item) VALUES\n  ('Mocha'), ('Bagel'), ('Muffin'), ('Croissant');",
+    "starterSql": "-- Items on exactly one of the two menus\nSELECT item, 'downtown' AS only_at FROM downtown_menu\nEXCEPT\nSELECT item, 'downtown' FROM uptown_menu  -- placeholder; fill the real symmetric difference\nORDER BY item;\n",
+    "orderMatters": true,
+    "hints": [
+      "Compute (downtown EXCEPT uptown) for items only downtown, and (uptown EXCEPT downtown) for items only uptown.",
+      "Tag each side with a literal label column ('downtown' / 'uptown') so EXCEPT compares item-only correctly within each half.",
+      "UNION the two halves, then apply one ORDER BY item at the very end."
+    ],
+    "approaches": [
+      {
+        "name": "(A EXCEPT B) UNION (B EXCEPT A)",
+        "sql": "SELECT item AS item, 'downtown' AS only_at\nFROM (\n  SELECT item FROM downtown_menu\n  EXCEPT\n  SELECT item FROM uptown_menu\n)\nUNION\nSELECT item AS item, 'uptown' AS only_at\nFROM (\n  SELECT item FROM uptown_menu\n  EXCEPT\n  SELECT item FROM downtown_menu\n)\nORDER BY item;",
+        "explanation": "1. The first derived table is `downtown EXCEPT uptown` — items only downtown. `EXCEPT` dedupes, so the two `Latte` rows collapse, leaving {Latte, Scone}.\n2. We tag those with the literal `'downtown'` as `only_at`.\n3. The second derived table is `uptown EXCEPT downtown` — items only uptown: {Muffin, Croissant} — tagged `'uptown'`.\n4. `UNION` stitches the two halves into the full **symmetric difference**. (Items on both menus — Mocha, Bagel — are excluded by both `EXCEPT`s.)\n5. A single trailing `ORDER BY item` sorts the combined result deterministically: Croissant, Latte, Muffin, Scone."
+      },
+      {
+        "name": "Tagged UNION ALL with NOT EXISTS",
+        "sql": "SELECT t.item AS item, t.only_at AS only_at\nFROM (\n  SELECT DISTINCT d.item AS item, 'downtown' AS only_at\n  FROM downtown_menu d\n  WHERE NOT EXISTS (SELECT 1 FROM uptown_menu u WHERE u.item = d.item)\n  UNION ALL\n  SELECT DISTINCT u.item AS item, 'uptown' AS only_at\n  FROM uptown_menu u\n  WHERE NOT EXISTS (SELECT 1 FROM downtown_menu d WHERE d.item = u.item)\n) t\nORDER BY t.item;",
+        "explanation": "1. Each half is an anti-join: downtown items with `NOT EXISTS` a matching uptown item, and vice-versa — the same logic as the two `EXCEPT`s.\n2. `SELECT DISTINCT` collapses the duplicate `Latte`, mirroring `EXCEPT`'s built-in dedupe.\n3. Because the two halves carry different `only_at` labels they can never collide, so `UNION ALL` is safe and equivalent to `UNION` here.\n4. The outer `ORDER BY t.item` produces the identical four rows in the same order as the `EXCEPT/UNION` version: Croissant (uptown), Latte (downtown), Muffin (uptown), Scone (downtown)."
+      }
+    ]
+  }
+]

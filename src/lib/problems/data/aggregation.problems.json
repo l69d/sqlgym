@@ -1,0 +1,275 @@
+[
+  {
+    "slug": "orders-per-customer",
+    "title": "Orders Per Customer",
+    "difficulty": "Easy",
+    "category": "Aggregation",
+    "concepts": ["GROUP BY", "COUNT"],
+    "description": "`GROUP BY` collapses rows that share a value into one group, and aggregate functions like `COUNT(*)` summarize each group.\n\n**Task:** for each `customer`, return how many rows they have in the `orders` table.\n\nReturn columns **`customer`, `order_count`**. Order by `order_count` descending, then `customer` ascending.",
+    "setupSql": "CREATE TABLE orders (id INTEGER, customer TEXT, amount INTEGER);\nINSERT INTO orders (id, customer, amount) VALUES\n  (1, 'Ada', 40),\n  (2, 'Ada', 15),\n  (3, 'Bea', 90),\n  (4, 'Cleo', 25),\n  (5, 'Ada', 30),\n  (6, 'Bea', 10);",
+    "starterSql": "SELECT customer, COUNT(*) AS order_count\nFROM orders\n-- GROUP BY ...\n",
+    "orderMatters": true,
+    "hints": [
+      "GROUP BY customer makes one group per distinct customer.",
+      "COUNT(*) counts the rows inside each group.",
+      "A total order needs a tiebreaker: after order_count DESC, sort by customer."
+    ],
+    "approaches": [
+      {
+        "name": "GROUP BY + COUNT",
+        "sql": "SELECT customer, COUNT(*) AS order_count\nFROM orders\nGROUP BY customer\nORDER BY order_count DESC, customer;",
+        "explanation": "1. **`GROUP BY customer`** partitions the six rows into one group per customer: Ada (3 rows), Bea (2 rows), Cleo (1 row).\n2. **`COUNT(*)`** counts the rows in each group; we alias it `order_count`.\n3. **`ORDER BY order_count DESC, customer`** sorts the busiest customers first. `customer` ascending is the tiebreaker so the order is fully determined even if two customers had the same count."
+      }
+    ]
+  },
+  {
+    "slug": "revenue-by-category",
+    "title": "Revenue By Category",
+    "difficulty": "Easy",
+    "category": "Aggregation",
+    "concepts": ["GROUP BY", "SUM", "AVG", "ROUND"],
+    "description": "Several aggregates can be computed in a single `GROUP BY` pass.\n\n**Task:** for each product `category`, return the total and average sale `amount`.\n\nReturn columns **`category`, `total`, `avg_amount`**, where `total = SUM(amount)` and `avg_amount = ROUND(AVG(amount), 2)` (round to 2 decimals). Order by `total` descending, then `category` ascending.",
+    "setupSql": "CREATE TABLE sales (id INTEGER, category TEXT, amount INTEGER);\nINSERT INTO sales (id, category, amount) VALUES\n  (1, 'Books', 30),\n  (2, 'Books', 20),\n  (3, 'Toys', 50),\n  (4, 'Toys', 50),\n  (5, 'Toys', 35),\n  (6, 'Games', 90);",
+    "starterSql": "SELECT category,\n       SUM(amount) AS total,\n       ROUND(AVG(amount), 2) AS avg_amount\nFROM sales\n-- GROUP BY ...\n",
+    "orderMatters": true,
+    "hints": [
+      "One GROUP BY can feed both SUM and AVG.",
+      "AVG can be fractional, so wrap it in ROUND(..., 2).",
+      "Order by total DESC and add category as a tiebreaker."
+    ],
+    "approaches": [
+      {
+        "name": "SUM + AVG in one pass",
+        "sql": "SELECT category,\n       SUM(amount) AS total,\n       ROUND(AVG(amount), 2) AS avg_amount\nFROM sales\nGROUP BY category\nORDER BY total DESC, category;",
+        "explanation": "1. **`GROUP BY category`** forms groups: Books (30, 20), Toys (50, 50, 35), Games (90).\n2. **`SUM(amount)`** adds the amounts per group: Books = 50, Toys = 135, Games = 90.\n3. **`AVG(amount)`** averages per group: Books = 25.0, Toys = 45.0, Games = 90.0. Because an average can have a fractional part, **`ROUND(..., 2)`** keeps it to two decimals as the prompt requires.\n4. **`ORDER BY total DESC, category`** lists the highest revenue first, breaking ties by category name."
+      }
+    ]
+  },
+  {
+    "slug": "distinct-products-per-store",
+    "title": "Distinct Products Per Store",
+    "difficulty": "Easy",
+    "category": "Aggregation",
+    "concepts": ["COUNT(DISTINCT)", "GROUP BY"],
+    "description": "`COUNT(*)` counts rows; `COUNT(DISTINCT col)` counts how many *different* values appear, ignoring repeats and NULLs.\n\n**Task:** for each `store`, return how many **distinct** products it has sold.\n\nReturn columns **`store`, `distinct_products`**. Order by `distinct_products` descending, then `store` ascending.",
+    "setupSql": "CREATE TABLE sales (store TEXT, product TEXT);\nINSERT INTO sales (store, product) VALUES\n  ('North', 'Pen'),\n  ('North', 'Pen'),\n  ('North', 'Pad'),\n  ('North', 'Ink'),\n  ('South', 'Pen'),\n  ('South', 'Pad'),\n  ('East',  'Ink'),\n  ('East',  'Ink');",
+    "starterSql": "SELECT store, COUNT(DISTINCT product) AS distinct_products\nFROM sales\n-- GROUP BY ...\n",
+    "orderMatters": true,
+    "hints": [
+      "COUNT(*) would over-count North because 'Pen' appears twice.",
+      "COUNT(DISTINCT product) counts each product name once per store.",
+      "Order by distinct_products DESC then store for a total order."
+    ],
+    "approaches": [
+      {
+        "name": "COUNT(DISTINCT ...)",
+        "sql": "SELECT store, COUNT(DISTINCT product) AS distinct_products\nFROM sales\nGROUP BY store\nORDER BY distinct_products DESC, store;",
+        "explanation": "1. **`GROUP BY store`** makes one group per store.\n2. **`COUNT(DISTINCT product)`** counts the unique product names in each group. North has rows Pen, Pen, Pad, Ink — `COUNT(*)` would say 4, but the distinct count is **3** (Pen, Pad, Ink). South has 2, East repeats Ink so it has 1.\n3. **`ORDER BY distinct_products DESC, store`** ranks the widest assortment first, using store as the tiebreaker."
+      }
+    ]
+  },
+  {
+    "slug": "paid-vs-unpaid-invoices",
+    "title": "Paid vs Unpaid Invoices",
+    "difficulty": "Medium",
+    "category": "Aggregation",
+    "concepts": ["conditional aggregation", "CASE", "FILTER", "GROUP BY"],
+    "description": "*Conditional aggregation* counts or sums only the rows that match a condition, without filtering the whole query. There are two idioms: `COUNT(CASE WHEN cond THEN 1 END)` and `COUNT(*) FILTER (WHERE cond)` — SQLite (3.45) supports both and they give identical results.\n\n**Task:** for each `client`, count how many invoices are paid and how many are unpaid, and sum the `amount` of the paid ones.\n\nReturn columns **`client`, `paid_count`, `unpaid_count`, `paid_amount`**, where `paid` means `status = 'paid'`. Treat a missing (NULL) paid_amount sum as `0`. Order by `client` ascending.",
+    "setupSql": "CREATE TABLE invoices (id INTEGER, client TEXT, status TEXT, amount INTEGER);\nINSERT INTO invoices (id, client, status, amount) VALUES\n  (1, 'Acme',   'paid',   100),\n  (2, 'Acme',   'unpaid', 40),\n  (3, 'Acme',   'paid',   60),\n  (4, 'Globex', 'unpaid', 25),\n  (5, 'Globex', 'unpaid', 75),\n  (6, 'Initech','paid',   200);",
+    "starterSql": "SELECT client,\n       COUNT(CASE WHEN status = 'paid' THEN 1 END)   AS paid_count,\n       COUNT(CASE WHEN status = 'unpaid' THEN 1 END) AS unpaid_count,\n       COALESCE(SUM(CASE WHEN status = 'paid' THEN amount END), 0) AS paid_amount\nFROM invoices\n-- GROUP BY ...\n",
+    "orderMatters": true,
+    "hints": [
+      "A CASE with no ELSE returns NULL for non-matching rows, and COUNT/SUM skip NULLs — so only the matching rows are tallied.",
+      "FILTER (WHERE cond) on an aggregate does the same thing more directly.",
+      "Globex has no paid invoices, so its paid_amount would be NULL — wrap it in COALESCE(..., 0)."
+    ],
+    "approaches": [
+      {
+        "name": "CASE inside the aggregates",
+        "sql": "SELECT client,\n       COUNT(CASE WHEN status = 'paid' THEN 1 END)   AS paid_count,\n       COUNT(CASE WHEN status = 'unpaid' THEN 1 END) AS unpaid_count,\n       COALESCE(SUM(CASE WHEN status = 'paid' THEN amount END), 0) AS paid_amount\nFROM invoices\nGROUP BY client\nORDER BY client;",
+        "explanation": "1. **`GROUP BY client`** makes one group per client.\n2. **`CASE WHEN status = 'paid' THEN 1 END`** yields `1` for paid rows and `NULL` for everything else (no ELSE branch). `COUNT(...)` ignores NULLs, so it counts only paid rows. The unpaid count mirrors that with the opposite condition.\n3. **`SUM(CASE WHEN status = 'paid' THEN amount END)`** adds the amount on paid rows only; non-paid rows contribute NULL, which SUM skips.\n4. **`COALESCE(..., 0)`** turns a NULL sum into 0. Globex has zero paid invoices, so its SUM is NULL — COALESCE makes it `0` instead.\n5. **`ORDER BY client`** gives a deterministic alphabetical order."
+      },
+      {
+        "name": "FILTER clause (equivalent)",
+        "sql": "SELECT client,\n       COUNT(*) FILTER (WHERE status = 'paid')   AS paid_count,\n       COUNT(*) FILTER (WHERE status = 'unpaid') AS unpaid_count,\n       COALESCE(SUM(amount) FILTER (WHERE status = 'paid'), 0) AS paid_amount\nFROM invoices\nGROUP BY client\nORDER BY client;",
+        "explanation": "This returns the **exact same** result, using the `FILTER (WHERE ...)` clause that SQLite 3.45 supports.\n\n1. **`COUNT(*) FILTER (WHERE status = 'paid')`** counts only the rows in the group that pass the filter — equivalent to the CASE trick but reads as 'count, but only the paid ones'.\n2. **`SUM(amount) FILTER (WHERE status = 'paid')`** sums amount over just the paid rows. Like CASE, it yields NULL when no rows match, so we still wrap it in `COALESCE(..., 0)` for Globex.\n\n**CASE vs FILTER:** they compute the same thing. FILTER is the more declarative form (the condition lives next to the aggregate); CASE works on any SQL engine and lets you map matching rows to an arbitrary value before aggregating. Both restrict *which rows feed the aggregate*, not which rows the query returns."
+      }
+    ]
+  },
+  {
+    "slug": "big-spenders-having",
+    "title": "Big Spenders (HAVING Threshold)",
+    "difficulty": "Medium",
+    "category": "Aggregation",
+    "concepts": ["GROUP BY", "HAVING", "SUM"],
+    "description": "`WHERE` filters individual rows *before* grouping; `HAVING` filters whole groups *after* aggregation, so it can reference aggregate values like `SUM(...)`.\n\n**Task:** return each `customer` whose **total** spend is at least 100, along with that total.\n\nReturn columns **`customer`, `total_spent`** where `total_spent = SUM(amount)`. Keep only groups with `total_spent >= 100`. Order by `total_spent` descending, then `customer` ascending.",
+    "setupSql": "CREATE TABLE payments (customer TEXT, amount INTEGER);\nINSERT INTO payments (customer, amount) VALUES\n  ('Ada',  60),\n  ('Ada',  50),\n  ('Bea',  30),\n  ('Bea',  20),\n  ('Cleo', 100),\n  ('Cleo', 40),\n  ('Dot',  90);",
+    "starterSql": "SELECT customer, SUM(amount) AS total_spent\nFROM payments\nGROUP BY customer\n-- HAVING ...\nORDER BY total_spent DESC, customer;",
+    "orderMatters": true,
+    "hints": [
+      "You cannot put SUM(amount) in a WHERE clause — the sum doesn't exist until after grouping.",
+      "HAVING runs after GROUP BY, so it can test SUM(amount) >= 100.",
+      "Ada totals 110, Cleo 140, Dot only 90, Bea only 50."
+    ],
+    "approaches": [
+      {
+        "name": "GROUP BY + HAVING on an aggregate",
+        "sql": "SELECT customer, SUM(amount) AS total_spent\nFROM payments\nGROUP BY customer\nHAVING SUM(amount) >= 100\nORDER BY total_spent DESC, customer;",
+        "explanation": "1. **`GROUP BY customer`** groups the payments per customer.\n2. **`SUM(amount)`** totals each group: Ada 110, Bea 50, Cleo 140, Dot 90.\n3. **`HAVING SUM(amount) >= 100`** keeps only groups whose total reaches the threshold. This must be HAVING, not WHERE, because the total is an aggregate that only exists after grouping. Bea (50) and Dot (90) are dropped.\n4. **`ORDER BY total_spent DESC, customer`** lists the biggest spender first, with customer as a tiebreaker."
+      }
+    ]
+  },
+  {
+    "slug": "grade-distribution-by-class",
+    "title": "Grade Distribution By Class",
+    "difficulty": "Medium",
+    "category": "Aggregation",
+    "concepts": ["GROUP BY multiple columns", "COUNT"],
+    "description": "Grouping by **multiple columns** makes one group per distinct *combination* of those columns.\n\n**Task:** for each (`class`, `grade`) pair, return how many students earned that grade.\n\nReturn columns **`class`, `grade`, `students`**. Order by `class` ascending, then `grade` ascending.",
+    "setupSql": "CREATE TABLE results (class TEXT, student TEXT, grade TEXT);\nINSERT INTO results (class, student, grade) VALUES\n  ('Math',    'Ann',  'A'),\n  ('Math',    'Bob',  'A'),\n  ('Math',    'Cy',   'B'),\n  ('Science', 'Dee',  'A'),\n  ('Science', 'Eve',  'C'),\n  ('Science', 'Finn', 'C'),\n  ('Science', 'Gus',  'C');",
+    "starterSql": "SELECT class, grade, COUNT(*) AS students\nFROM results\n-- GROUP BY class, grade\n",
+    "orderMatters": true,
+    "hints": [
+      "List both columns in GROUP BY: GROUP BY class, grade.",
+      "Each (class, grade) combination becomes its own group.",
+      "Order by class then grade so the rows are fully sorted."
+    ],
+    "approaches": [
+      {
+        "name": "GROUP BY two columns",
+        "sql": "SELECT class, grade, COUNT(*) AS students\nFROM results\nGROUP BY class, grade\nORDER BY class, grade;",
+        "explanation": "1. **`GROUP BY class, grade`** forms one group per unique pair: (Math, A), (Math, B), (Science, A), (Science, C).\n2. **`COUNT(*)`** counts the students in each pair: (Math, A)=2, (Math, B)=1, (Science, A)=1, (Science, C)=3.\n3. **`ORDER BY class, grade`** sorts by class first, then grade within each class, producing a stable, fully ordered grade distribution."
+      }
+    ]
+  },
+  {
+    "slug": "tags-per-post-ordered",
+    "title": "Tags Per Post (Ordered List)",
+    "difficulty": "Medium",
+    "category": "Aggregation",
+    "concepts": ["group_concat", "ordered aggregation", "GROUP BY"],
+    "description": "`group_concat(x, sep)` stitches the values in a group into a single delimited string. To make the output **deterministic** you must control the order the values are concatenated in.\n\n**Task:** for each `post_id`, build a comma-separated string of its tag `name`s, sorted **alphabetically** within the post.\n\nReturn columns **`post_id`, `tags`** where, for example, a post tagged `sql`, `data`, `db` becomes `data,db,sql` (comma, no spaces). Order the result rows by `post_id` ascending.",
+    "setupSql": "CREATE TABLE post_tags (post_id INTEGER, name TEXT);\nINSERT INTO post_tags (post_id, name) VALUES\n  (1, 'sql'),\n  (1, 'data'),\n  (1, 'db'),\n  (2, 'python'),\n  (2, 'etl'),\n  (3, 'cache');",
+    "starterSql": "-- group_concat is order-sensitive; sort the values first\nSELECT post_id, group_concat(name, ',') AS tags\nFROM (SELECT post_id, name FROM post_tags ORDER BY post_id, name)\nGROUP BY post_id\nORDER BY post_id;",
+    "orderMatters": true,
+    "hints": [
+      "Without an explicit order, group_concat may emit tags in any order.",
+      "SQLite supports group_concat(name ORDER BY name) inline, or you can sort in a subquery first.",
+      "Use ',' as the separator and order the rows by post_id."
+    ],
+    "approaches": [
+      {
+        "name": "Sort in a subquery, then group_concat",
+        "sql": "SELECT post_id, group_concat(name, ',') AS tags\nFROM (SELECT post_id, name FROM post_tags ORDER BY post_id, name)\nGROUP BY post_id\nORDER BY post_id;",
+        "explanation": "1. The **inner subquery** `SELECT post_id, name FROM post_tags ORDER BY post_id, name` produces rows already sorted by name within each post.\n2. **`group_concat(name, ',')`** then concatenates the names in the order they arrive, so for post 1 it emits `data,db,sql`. The second argument `','` is the separator.\n3. **`GROUP BY post_id`** makes one string per post; **`ORDER BY post_id`** sorts the result rows.\n\nSorting first is the portable way to make `group_concat` deterministic — without it, the concatenation order is unspecified."
+      },
+      {
+        "name": "Inline ORDER BY inside group_concat",
+        "sql": "SELECT post_id, group_concat(name ORDER BY name, ',') AS tags\nFROM post_tags\nGROUP BY post_id\nORDER BY post_id;",
+        "explanation": "SQLite 3.44+ accepts an `ORDER BY` *inside* the aggregate: `group_concat(name ORDER BY name, ',')` sorts the values by `name` before joining them with `','`. This yields the identical strings (`data,db,sql`, etc.) without a wrapping subquery. It is more concise; the subquery form is more portable to older engines."
+      }
+    ]
+  },
+  {
+    "slug": "pass-rate-per-quiz",
+    "title": "Pass Rate Per Quiz",
+    "difficulty": "Medium",
+    "category": "Aggregation",
+    "concepts": ["ratio of subgroup to total", "conditional aggregation", "AVG", "ROUND"],
+    "description": "A *ratio of a subgroup to the group total* is just `(count of matching rows) / (count of all rows)` per group. A neat shortcut: `AVG(condition)` already gives that fraction, because the condition is 1 when true and 0 when false.\n\n**Task:** for each `quiz`, return the fraction of attempts that passed (`score >= 50`).\n\nReturn columns **`quiz`, `pass_rate`** where `pass_rate = ROUND(passing_attempts * 1.0 / total_attempts, 2)` (round to 2 decimals, as a fraction between 0 and 1). Order by `pass_rate` descending, then `quiz` ascending.",
+    "setupSql": "CREATE TABLE attempts (quiz TEXT, student TEXT, score INTEGER);\nINSERT INTO attempts (quiz, student, score) VALUES\n  ('Q1', 'a', 80),\n  ('Q1', 'b', 40),\n  ('Q1', 'c', 60),\n  ('Q1', 'd', 50),\n  ('Q2', 'a', 30),\n  ('Q2', 'b', 20),\n  ('Q3', 'a', 90),\n  ('Q3', 'b', 70);",
+    "starterSql": "SELECT quiz,\n       ROUND(\n         SUM(CASE WHEN score >= 50 THEN 1 ELSE 0 END) * 1.0 / COUNT(*),\n         2\n       ) AS pass_rate\nFROM attempts\n-- GROUP BY ...\n",
+    "orderMatters": true,
+    "hints": [
+      "Numerator = count of rows with score >= 50; denominator = COUNT(*).",
+      "Multiply by 1.0 (or use AVG) so you get a real division, not integer truncation.",
+      "Q1: 3 of 4 pass = 0.75, Q2: 0 of 2 = 0.0, Q3: 2 of 2 = 1.0."
+    ],
+    "approaches": [
+      {
+        "name": "Subgroup count over total count",
+        "sql": "SELECT quiz,\n       ROUND(\n         SUM(CASE WHEN score >= 50 THEN 1 ELSE 0 END) * 1.0 / COUNT(*),\n         2\n       ) AS pass_rate\nFROM attempts\nGROUP BY quiz\nORDER BY pass_rate DESC, quiz;",
+        "explanation": "1. **`GROUP BY quiz`** groups attempts per quiz.\n2. **`SUM(CASE WHEN score >= 50 THEN 1 ELSE 0 END)`** is the subgroup count — the number of passing attempts. **`COUNT(*)`** is the group total.\n3. The **`* 1.0`** forces floating-point division (otherwise integer `/` would truncate 3/4 to 0). The ratio is the pass rate: Q1 = 3/4 = 0.75, Q2 = 0/2 = 0.0, Q3 = 2/2 = 1.0.\n4. **`ROUND(..., 2)`** trims to two decimals as required.\n5. **`ORDER BY pass_rate DESC, quiz`** ranks the easiest quiz first, with quiz as a tiebreaker."
+      },
+      {
+        "name": "AVG of the boolean condition",
+        "sql": "SELECT quiz,\n       ROUND(AVG(CASE WHEN score >= 50 THEN 1.0 ELSE 0.0 END), 2) AS pass_rate\nFROM attempts\nGROUP BY quiz\nORDER BY pass_rate DESC, quiz;",
+        "explanation": "Same result via a shortcut. `CASE WHEN score >= 50 THEN 1.0 ELSE 0.0 END` is 1.0 for a pass and 0.0 for a fail, so **`AVG(...)`** of those values *is* the fraction that passed — the average of a 0/1 indicator equals (count of 1s) / (count of all). Using `1.0`/`0.0` keeps it floating point. `ROUND(..., 2)` matches the precision of the first approach, so both produce identical pass_rate values."
+      }
+    ]
+  },
+  {
+    "slug": "weighted-course-gpa",
+    "title": "Weighted Course GPA",
+    "difficulty": "Hard",
+    "category": "Aggregation",
+    "concepts": ["weighted average", "SUM", "ROUND", "GROUP BY"],
+    "description": "A **weighted average** weights each value by an importance factor: `weighted_avg = SUM(weight * value) / SUM(weight)`. A plain `AVG` is wrong here because it would treat a 1-credit and a 4-credit course equally.\n\n**Task:** for each `student`, compute their credit-weighted GPA across courses, weighting each course `grade_point` by its `credits`.\n\nReturn columns **`student`, `gpa`** where `gpa = ROUND(SUM(credits * grade_point) / SUM(credits), 2)` (round to 2 decimals). Order by `gpa` descending, then `student` ascending.",
+    "setupSql": "CREATE TABLE enrollments (student TEXT, course TEXT, credits INTEGER, grade_point REAL);\nINSERT INTO enrollments (student, course, credits, grade_point) VALUES\n  ('Ada',  'Algebra',  4, 4.0),\n  ('Ada',  'Art',      1, 2.0),\n  ('Bea',  'Biology',  3, 3.0),\n  ('Bea',  'Bands',    1, 3.0),\n  ('Cleo', 'Calculus', 2, 4.0),\n  ('Cleo', 'Chem',     2, 2.0);",
+    "starterSql": "SELECT student,\n       ROUND(SUM(credits * grade_point) / SUM(credits), 2) AS gpa\nFROM enrollments\n-- GROUP BY ...\n",
+    "orderMatters": true,
+    "hints": [
+      "A plain AVG(grade_point) ignores credit weighting and gives the wrong answer.",
+      "Compute SUM(credits * grade_point) for the numerator and SUM(credits) for the denominator.",
+      "Ada: (4*4.0 + 1*2.0) / 5 = 18/5 = 3.6, not the simple average of 3.0."
+    ],
+    "approaches": [
+      {
+        "name": "SUM(w*x) / SUM(w)",
+        "sql": "SELECT student,\n       ROUND(SUM(credits * grade_point) / SUM(credits), 2) AS gpa\nFROM enrollments\nGROUP BY student\nORDER BY gpa DESC, student;",
+        "explanation": "1. **`GROUP BY student`** groups each student's courses.\n2. **`SUM(credits * grade_point)`** is the weighted numerator: each course contributes its grade point times its credit weight. For Ada that's `4*4.0 + 1*2.0 = 18.0`.\n3. **`SUM(credits)`** is the total weight (denominator): Ada has `4 + 1 = 5` credits.\n4. The division gives the weighted average: Ada `18.0 / 5 = 3.6`. Compare with a plain `AVG(grade_point)` of `(4.0+2.0)/2 = 3.0`, which is wrong because it ignores that Algebra carries four times the credit of Art. Bea = `(9.0+3.0)/4 = 3.0`, Cleo = `(8.0+4.0)/4 = 3.0`.\n5. **`ROUND(..., 2)`** trims the result; **`ORDER BY gpa DESC, student`** ranks the strongest GPA first with student as the tiebreaker."
+      }
+    ]
+  },
+  {
+    "slug": "favorite-genre-per-user",
+    "title": "Favorite Genre Per User (Mode)",
+    "difficulty": "Hard",
+    "category": "Aggregation",
+    "concepts": ["mode", "most-frequent value", "COUNT", "window functions", "GROUP BY"],
+    "description": "The **mode** is the most frequent value in a group. There is no built-in `MODE()` in SQLite, so you build it: count occurrences of each value within each group, then keep the value with the highest count per group.\n\n**Task:** for each `user`, return the `genre` they watched **most often**. The data is designed so each user has a single strict winner (no ties).\n\nReturn columns **`user`, `genre`**. Order by `user` ascending.",
+    "setupSql": "CREATE TABLE views (user TEXT, genre TEXT);\nINSERT INTO views (user, genre) VALUES\n  ('Ann', 'Drama'),\n  ('Ann', 'Drama'),\n  ('Ann', 'Comedy'),\n  ('Bob', 'Action'),\n  ('Bob', 'Action'),\n  ('Bob', 'Action'),\n  ('Bob', 'Drama'),\n  ('Cy',  'Horror'),\n  ('Cy',  'Comedy'),\n  ('Cy',  'Comedy');",
+    "starterSql": "-- count per (user, genre), then keep the top genre per user\nWITH counts AS (\n  SELECT user, genre, COUNT(*) AS n\n  FROM views\n  GROUP BY user, genre\n)\nSELECT user, genre\nFROM (\n  SELECT user, genre,\n         ROW_NUMBER() OVER (PARTITION BY user ORDER BY n DESC, genre) AS rk\n  FROM counts\n)\nWHERE rk = 1\nORDER BY user;",
+    "orderMatters": true,
+    "hints": [
+      "First aggregate: COUNT(*) grouped by (user, genre) gives the play count of each genre per user.",
+      "Then rank those counts within each user (ROW_NUMBER over PARTITION BY user ORDER BY count DESC) and keep rank 1.",
+      "The data has a strict winner per user, so the mode is unambiguous."
+    ],
+    "approaches": [
+      {
+        "name": "Count per group, then ROW_NUMBER to pick the top",
+        "sql": "WITH counts AS (\n  SELECT user, genre, COUNT(*) AS n\n  FROM views\n  GROUP BY user, genre\n)\nSELECT user, genre\nFROM (\n  SELECT user, genre,\n         ROW_NUMBER() OVER (PARTITION BY user ORDER BY n DESC, genre) AS rk\n  FROM counts\n)\nWHERE rk = 1\nORDER BY user;",
+        "explanation": "1. The **`counts` CTE** does the per-value tally: `GROUP BY user, genre` with `COUNT(*)` yields how many times each user watched each genre — Ann: Drama 2, Comedy 1; Bob: Action 3, Drama 1; Cy: Comedy 2, Horror 1.\n2. **`ROW_NUMBER() OVER (PARTITION BY user ORDER BY n DESC, genre)`** numbers each user's genres from most to least frequent. The `genre` tiebreaker keeps the numbering deterministic, but the data guarantees a strict winner anyway.\n3. **`WHERE rk = 1`** keeps only each user's top genre — the mode.\n4. **`ORDER BY user`** sorts the final rows. Result: Ann→Drama, Bob→Action, Cy→Comedy."
+      },
+      {
+        "name": "Correlated subquery picking the max-count genre",
+        "sql": "SELECT user, genre\nFROM (\n  SELECT user, genre, COUNT(*) AS n\n  FROM views\n  GROUP BY user, genre\n) c\nWHERE n = (\n  SELECT MAX(n2) FROM (\n    SELECT COUNT(*) AS n2\n    FROM views v\n    WHERE v.user = c.user\n    GROUP BY v.genre\n  )\n)\nORDER BY user;",
+        "explanation": "Same result without a window function. The outer query lists each (user, genre) with its count `n`. The **correlated subquery** recomputes, for that same user, the maximum genre count, and the `WHERE n = (max)` keeps only the genre(s) that hit that maximum. Because the data has a strict per-user winner, exactly one genre matches each user, so this returns the same Ann→Drama, Bob→Action, Cy→Comedy. `ORDER BY user` fixes the row order."
+      }
+    ]
+  },
+  {
+    "slug": "department-payroll-over-join",
+    "title": "Department Payroll (Aggregate Over Join)",
+    "difficulty": "Hard",
+    "category": "Aggregation",
+    "concepts": ["aggregate over join", "JOIN", "GROUP BY", "SUM", "COUNT", "HAVING"],
+    "description": "Aggregates often run **over a join**: join the tables first, then GROUP BY a column from one side and aggregate a column from the other. Group by the department *name* (from `departments`), not just the id, and remember that GROUP BY happens after the join.\n\n**Task:** for each department, return the head count and total salary, but only for departments whose total salary exceeds 100.\n\nReturn columns **`department`, `headcount`, `total_salary`** where `headcount = COUNT(employee rows)` and `total_salary = SUM(salary)`. Keep only departments with `total_salary > 100`. Order by `total_salary` descending, then `department` ascending.",
+    "setupSql": "CREATE TABLE departments (id INTEGER, name TEXT);\nINSERT INTO departments (id, name) VALUES\n  (1, 'Engineering'),\n  (2, 'Sales'),\n  (3, 'Legal');\n\nCREATE TABLE employees (id INTEGER, dept_id INTEGER, salary INTEGER);\nINSERT INTO employees (id, dept_id, salary) VALUES\n  (1, 1, 90),\n  (2, 1, 70),\n  (3, 2, 60),\n  (4, 2, 50),\n  (5, 3, 40);",
+    "starterSql": "SELECT d.name AS department,\n       COUNT(*)      AS headcount,\n       SUM(e.salary) AS total_salary\nFROM departments d\nJOIN employees e ON e.dept_id = d.id\nGROUP BY d.name\n-- HAVING ...\nORDER BY total_salary DESC, department;",
+    "orderMatters": true,
+    "hints": [
+      "Join employees to departments on dept_id = id so each employee row carries its department name.",
+      "GROUP BY the department name, then COUNT(*) and SUM(salary).",
+      "Engineering = 160, Sales = 110, Legal = 40 — HAVING total_salary > 100 drops Legal."
+    ],
+    "approaches": [
+      {
+        "name": "JOIN then GROUP BY with HAVING",
+        "sql": "SELECT d.name AS department,\n       COUNT(*)      AS headcount,\n       SUM(e.salary) AS total_salary\nFROM departments d\nJOIN employees e ON e.dept_id = d.id\nGROUP BY d.name\nHAVING SUM(e.salary) > 100\nORDER BY total_salary DESC, department;",
+        "explanation": "1. The **`JOIN`** matches each employee to its department via `e.dept_id = d.id`, so every employee row now also has the department `name`.\n2. **`GROUP BY d.name`** groups those joined rows by department.\n3. **`COUNT(*)`** is the head count of employees in each department; **`SUM(e.salary)`** totals their salaries: Engineering 160 (2 people), Sales 110 (2), Legal 40 (1).\n4. **`HAVING SUM(e.salary) > 100`** filters the aggregated groups, dropping Legal (40). HAVING is required because the test is on an aggregate computed after grouping.\n5. **`ORDER BY total_salary DESC, department`** ranks the costliest department first, with department name as the tiebreaker."
+      }
+    ]
+  }
+]

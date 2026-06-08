@@ -1,0 +1,353 @@
+[
+  {
+    "slug": "gap-to-next-login",
+    "title": "Gap To Next Login",
+    "difficulty": "Medium",
+    "category": "Window Functions",
+    "concepts": ["LEAD", "Window Functions", "Date Diff"],
+    "description": "`LEAD(col) OVER (ORDER BY ...)` peeks at a **later** row from the current one, which lets you compare an event to the *next* event without a self-join.\n\nThe `logins` table records one row per time a user signed in.\n\n**Task:** for each login, show the user's **next** login date and the number of days until it. The most recent login for each user has no next login, so its gap is `NULL` — exclude those rows entirely (only return logins that have a following login for the same user).\n\nReturn columns **`user_name`, `login_date`, `next_login_date`, `days_to_next`**, ordered by `user_name` ascending, then `login_date` ascending.",
+    "setupSql": "CREATE TABLE logins (user_name TEXT, login_date TEXT);\nINSERT INTO logins (user_name, login_date) VALUES\n  ('Ana',  '2024-03-01'),\n  ('Ana',  '2024-03-04'),\n  ('Ana',  '2024-03-10'),\n  ('Ben',  '2024-03-02'),\n  ('Ben',  '2024-03-05'),\n  ('Cy',   '2024-03-07');",
+    "starterSql": "-- Use LEAD partitioned by user, ordered by login_date\nSELECT user_name, login_date\nFROM logins\n",
+    "orderMatters": true,
+    "hints": [
+      "Partition by user_name and order by login_date so LEAD stays within one user's timeline.",
+      "LEAD(login_date) OVER (PARTITION BY user_name ORDER BY login_date) is the next login.",
+      "Compute the gap with JULIANDAY(next) - JULIANDAY(current); wrap the LEAD query in a CTE so you can filter out NULL next dates."
+    ],
+    "approaches": [
+      {
+        "name": "LEAD + JULIANDAY gap",
+        "sql": "WITH paired AS (\n  SELECT\n    user_name,\n    login_date,\n    LEAD(login_date) OVER (PARTITION BY user_name ORDER BY login_date) AS next_login_date\n  FROM logins\n)\nSELECT\n  user_name,\n  login_date,\n  next_login_date,\n  CAST(JULIANDAY(next_login_date) - JULIANDAY(login_date) AS INTEGER) AS days_to_next\nFROM paired\nWHERE next_login_date IS NOT NULL\nORDER BY user_name, login_date;",
+        "explanation": "1. **`LEAD(login_date) OVER (PARTITION BY user_name ORDER BY login_date)`** returns, for each row, the *following* login date for the same user. The `PARTITION BY user_name` resets the lookahead at each user boundary so Ana's last login does not borrow Ben's first.\n2. The window assigns each user's final login a `NULL` next date (there is no row after it). We push the window into the `paired` CTE so we can reference `next_login_date` in a `WHERE`.\n3. **`WHERE next_login_date IS NOT NULL`** drops those trailing rows, leaving only logins that actually have a successor.\n4. **`JULIANDAY(next) - JULIANDAY(current)`** is the difference in days; `CAST(... AS INTEGER)` makes it a whole number. Ana 03-01→03-04 = 3, 03-04→03-10 = 6; Ben 03-02→03-05 = 3.\n5. **`ORDER BY user_name, login_date`** gives a fully deterministic order."
+      },
+      {
+        "name": "Correlated subquery (no window)",
+        "sql": "SELECT\n  l.user_name,\n  l.login_date,\n  (SELECT MIN(n.login_date) FROM logins n\n   WHERE n.user_name = l.user_name AND n.login_date > l.login_date) AS next_login_date,\n  CAST(JULIANDAY(\n    (SELECT MIN(n.login_date) FROM logins n\n     WHERE n.user_name = l.user_name AND n.login_date > l.login_date)\n  ) - JULIANDAY(l.login_date) AS INTEGER) AS days_to_next\nFROM logins l\nWHERE EXISTS (\n  SELECT 1 FROM logins n\n  WHERE n.user_name = l.user_name AND n.login_date > l.login_date\n)\nORDER BY l.user_name, l.login_date;",
+        "explanation": "The same answer without window functions. The correlated subquery `MIN(login_date) WHERE login_date > current` finds the earliest later login (the LEAD value), and the `EXISTS` filter keeps only rows that have one. This is the pattern `LEAD` replaces: one tidy window scan instead of a subquery per row."
+      }
+    ]
+  },
+  {
+    "slug": "exam-score-percentile",
+    "title": "Exam Score Percentile",
+    "difficulty": "Medium",
+    "category": "Window Functions",
+    "concepts": ["CUME_DIST", "PERCENT_RANK", "Window Functions"],
+    "description": "`CUME_DIST()` returns the cumulative distribution of a row: the fraction of rows whose ordered value is **≤** the current row's value (so the maximum row always gets `1.0`). It is a window function, so it runs over an `ORDER BY` without collapsing rows.\n\nThe `scores` table holds one row per student with an exam `score`.\n\n**Task:** for each student, report their percentile as `CUME_DIST()` over ascending score, expressed as a **whole-number percentage rounded to 1 decimal place** (multiply by 100, then `ROUND(..., 1)`).\n\nReturn columns **`student`, `score`, `percentile`**, ordered by `score` ascending, then `student` ascending.",
+    "setupSql": "CREATE TABLE scores (student TEXT, score INTEGER);\nINSERT INTO scores (student, score) VALUES\n  ('Mia',   55),\n  ('Noah',  70),\n  ('Olive', 70),\n  ('Pax',   85),\n  ('Quinn', 95);",
+    "starterSql": "-- CUME_DIST() over the scores, scaled to a percentage\nSELECT student, score\nFROM scores\n",
+    "orderMatters": true,
+    "hints": [
+      "CUME_DIST() OVER (ORDER BY score) gives a fraction in (0, 1].",
+      "Tied scores share the same CUME_DIST value because both are counted as ≤ the value.",
+      "Scale by 100 and ROUND(..., 1) so the percentile reads like 40.0 rather than 0.4."
+    ],
+    "approaches": [
+      {
+        "name": "CUME_DIST scaled to percent",
+        "sql": "SELECT\n  student,\n  score,\n  ROUND(CUME_DIST() OVER (ORDER BY score) * 100, 1) AS percentile\nFROM scores\nORDER BY score, student;",
+        "explanation": "1. **`CUME_DIST() OVER (ORDER BY score)`** = (number of rows with score ≤ this row) / (total rows). With 5 students: Mia(55) → 1/5 = 0.2, Noah & Olive(70) are tied so both count as 3 rows ≤ 70 → 3/5 = 0.6, Pax(85) → 4/5 = 0.8, Quinn(95) → 5/5 = 1.0.\n2. **`* 100`** turns the fraction into a percentage; **`ROUND(..., 1)`** keeps one decimal: 20.0, 60.0, 60.0, 80.0, 100.0. Rounding is required because the raw value is fractional.\n3. The two tied 70s receive the **same** percentile (60.0) — that is the defining behaviour of `CUME_DIST`.\n4. **`ORDER BY score, student`** makes the output a total order (the tie on 70 is broken by `student`)."
+      },
+      {
+        "name": "Self-join count of ≤ values",
+        "sql": "SELECT\n  s.student,\n  s.score,\n  ROUND(\n    (SELECT COUNT(*) FROM scores x WHERE x.score <= s.score) * 100.0\n    / (SELECT COUNT(*) FROM scores),\n  1) AS percentile\nFROM scores s\nORDER BY s.score, s.student;",
+        "explanation": "Computes the same cumulative distribution by hand: for each row, count how many scores are `<= score` and divide by the total. The `100.0` forces float division so the rounding behaves. It reproduces the CUME_DIST values exactly, including the shared 60.0 for the tied 70s, confirming the window function's definition."
+      }
+    ]
+  },
+  {
+    "slug": "running-maximum-balance",
+    "title": "Running Maximum Balance",
+    "difficulty": "Medium",
+    "category": "Window Functions",
+    "concepts": ["MAX OVER", "Running Aggregate", "Window Functions"],
+    "description": "An aggregate used as a window function — `MAX(col) OVER (ORDER BY ...)` — computes a **running** value: at each row it reports the maximum seen so far (the default frame is everything from the start of the partition up to the current row).\n\nThe `balances` table records an account's end-of-day balance, one row per day.\n\n**Task:** for each day, show the balance and the **highest balance reached up to and including that day** (the running maximum / high-water mark).\n\nReturn columns **`day`, `balance`, `running_max`**, ordered by `day` ascending.",
+    "setupSql": "CREATE TABLE balances (day TEXT, balance INTEGER);\nINSERT INTO balances (day, balance) VALUES\n  ('2024-05-01', 100),\n  ('2024-05-02', 140),\n  ('2024-05-03', 120),\n  ('2024-05-04', 200),\n  ('2024-05-05', 160);",
+    "starterSql": "-- MAX(balance) as a running window over day\nSELECT day, balance\nFROM balances\n",
+    "orderMatters": true,
+    "hints": [
+      "MAX(balance) OVER (ORDER BY day) is a running maximum, not a grand total.",
+      "With ORDER BY in the OVER clause, the implicit frame is UNBOUNDED PRECEDING to CURRENT ROW.",
+      "The running max never decreases — once it hits 140 it stays ≥ 140."
+    ],
+    "approaches": [
+      {
+        "name": "MAX(...) OVER (ORDER BY day)",
+        "sql": "SELECT\n  day,\n  balance,\n  MAX(balance) OVER (ORDER BY day) AS running_max\nFROM balances\nORDER BY day;",
+        "explanation": "1. **`MAX(balance) OVER (ORDER BY day)`** turns the `MAX` aggregate into a window function. Because there is an `ORDER BY` and no explicit frame, SQLite uses the default frame `RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` — i.e. all rows from the first day through the current day.\n2. Walking the days: 100 → max 100; 140 → max 140; 120 → max still 140 (120 < 140); 200 → max 200; 160 → max still 200.\n3. The key property: the running max is **monotonically non-decreasing**. It rises when a new high arrives and holds otherwise (the day-3 dip to 120 does not lower it).\n4. **`ORDER BY day`** in the outer query fixes the row order for display."
+      },
+      {
+        "name": "Correlated subquery high-water mark",
+        "sql": "SELECT\n  b.day,\n  b.balance,\n  (SELECT MAX(x.balance) FROM balances x WHERE x.day <= b.day) AS running_max\nFROM balances b\nORDER BY b.day;",
+        "explanation": "The pre-window way to express a running max: for each day, take `MAX(balance)` over all rows whose `day <= b.day`. It yields the identical high-water-mark sequence 100, 140, 140, 200, 200, demonstrating that `MAX(...) OVER (ORDER BY ...)` is exactly this prefix maximum computed in a single pass."
+      }
+    ]
+  },
+  {
+    "slug": "daily-cumulative-sales-range-vs-rows",
+    "title": "Daily Cumulative Sales (RANGE vs ROWS)",
+    "difficulty": "Hard",
+    "category": "Window Functions",
+    "concepts": ["RANGE frame", "ROWS frame", "Window Functions", "Frame ties"],
+    "description": "When an `OVER` clause has `ORDER BY` keys with **ties**, the frame mode matters:\n\n- **`RANGE`** frames group all *peer* rows (rows equal on the `ORDER BY` key) together — they all share one running value.\n- **`ROWS`** frames count *physical* rows one at a time, so tied rows get different running values depending on physical order.\n\nThe `daily_sales` table has multiple sale rows per `sale_date`. We want a **per-day cumulative total**: every row of a given day should show the same running total, namely the sum of all sales on that day and all earlier days. That requires a `RANGE` frame.\n\n**Task:** return each sale with its correct per-day cumulative total.\n\nReturn columns **`sale_date`, `amount`, `cume_total`**, ordered by `sale_date` ascending, then `amount` ascending.",
+    "setupSql": "CREATE TABLE daily_sales (sale_date TEXT, amount INTEGER);\nINSERT INTO daily_sales (sale_date, amount) VALUES\n  ('2024-06-01', 10),\n  ('2024-06-01', 20),\n  ('2024-06-02', 5),\n  ('2024-06-02', 5),\n  ('2024-06-03', 100);",
+    "starterSql": "-- The order key (sale_date) has ties. Pick the frame that makes\n-- every row of a day share the same cumulative total.\nSELECT sale_date, amount\nFROM daily_sales\n",
+    "orderMatters": true,
+    "hints": [
+      "Two rows share 2024-06-01 and two share 2024-06-02 — these are 'peers' on the ORDER BY key.",
+      "RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW includes every peer of the current row; ROWS includes only physically-prior rows.",
+      "For a per-day total that is identical across a day's rows, you need RANGE."
+    ],
+    "approaches": [
+      {
+        "name": "RANGE frame (correct)",
+        "sql": "SELECT\n  sale_date,\n  amount,\n  SUM(amount) OVER (\n    ORDER BY sale_date\n    RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW\n  ) AS cume_total\nFROM daily_sales\nORDER BY sale_date, amount;",
+        "explanation": "1. The frame `RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` is **value-based**: the window for the current row includes every row whose `sale_date` is ≤ the current `sale_date`. Crucially, all rows that **tie** on `sale_date` are peers and are all included together.\n2. Day 2024-06-01 has two rows (10, 20). Both are peers, so **both** see the full day total 30 → `cume_total = 30` for each.\n3. Day 2024-06-02 (5, 5): peers again. The window = all of day 1 (30) + all of day 2 (10) = 40 → both rows show 40.\n4. Day 2024-06-03 (100): 30 + 10 + 100 = 140.\n5. **Why `ROWS` would be wrong here:** `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` counts physical rows, so the first 06-01 row would show 10 and the second 30 — the two rows of the same day would **disagree**, which is not a 'per-day' total. The `RANGE` frame is what makes every row of a day share one cumulative figure.\n6. Output order `sale_date, amount` is a total order (the tied 5/5 rows are identical, keeping the multiset deterministic)."
+      },
+      {
+        "name": "RANGE is the OVER-clause default",
+        "sql": "SELECT\n  sale_date,\n  amount,\n  SUM(amount) OVER (ORDER BY sale_date) AS cume_total\nFROM daily_sales\nORDER BY sale_date, amount;",
+        "explanation": "When you write `SUM(amount) OVER (ORDER BY sale_date)` with **no explicit frame**, SQLite applies the SQL-standard default `RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW`. So this short form is identical to the explicit RANGE query above and returns 30, 30, 40, 40, 140 — proving the default frame is RANGE, not ROWS."
+      },
+      {
+        "name": "Per-day total via grouped join (no window)",
+        "sql": "SELECT\n  d.sale_date,\n  d.amount,\n  (SELECT SUM(x.amount) FROM daily_sales x WHERE x.sale_date <= d.sale_date) AS cume_total\nFROM daily_sales d\nORDER BY d.sale_date, d.amount;",
+        "explanation": "The correlated subquery `SUM(amount) WHERE x.sale_date <= d.sale_date` is the value-based (RANGE) semantics written out by hand: it sums every row up to and including the current date, so tied dates share one total. It matches the RANGE answer 30, 30, 40, 40, 140 — a ROWS frame could not be reproduced this simply because ROWS depends on physical row position, not on the date value."
+      }
+    ]
+  },
+  {
+    "slug": "median-home-price",
+    "title": "Median Home Price",
+    "difficulty": "Hard",
+    "category": "Ranking",
+    "concepts": ["ROW_NUMBER", "Median", "Ranking"],
+    "description": "SQLite has no `MEDIAN()` function, so you build it with ranking. Number the rows **from both ends** with `ROW_NUMBER()`: one ascending, one descending. The middle element(s) are exactly the rows where the two numbers are within 1 of each other:\n\n- **odd** count → one middle row (`rn_asc = rn_desc`),\n- **even** count → two middle rows (`|rn_asc - rn_desc| = 1`).\n\nAveraging the selected rows gives the median in both cases.\n\nThe `homes` table has one row per home with a `price`.\n\n**Task:** compute the median price. With 6 homes the median is the average of the 3rd and 4th cheapest. Round to 2 decimals.\n\nReturn a single column **`median_price`** (one row).",
+    "setupSql": "CREATE TABLE homes (id INTEGER, price INTEGER);\nINSERT INTO homes (id, price) VALUES\n  (1, 300000),\n  (2, 250000),\n  (3, 400000),\n  (4, 500000),\n  (5, 350000),\n  (6, 275000);",
+    "starterSql": "-- Rank ascending and descending, then average the middle row(s)\nWITH ranked AS (\n  SELECT price\n  FROM homes\n)\nSELECT 1\n",
+    "orderMatters": false,
+    "hints": [
+      "ROW_NUMBER() OVER (ORDER BY price) and ROW_NUMBER() OVER (ORDER BY price DESC) number from both ends.",
+      "The middle row(s) satisfy ABS(rn_asc - rn_desc) <= 1: equal for odd counts, off-by-one for even.",
+      "AVG over those rows handles both cases; ROUND to 2 decimals because an even count averages two values."
+    ],
+    "approaches": [
+      {
+        "name": "Double ROW_NUMBER from both ends",
+        "sql": "WITH ranked AS (\n  SELECT\n    price,\n    ROW_NUMBER() OVER (ORDER BY price)       AS rn_asc,\n    ROW_NUMBER() OVER (ORDER BY price DESC)  AS rn_desc\n  FROM homes\n)\nSELECT ROUND(AVG(price), 2) AS median_price\nFROM ranked\nWHERE ABS(rn_asc - rn_desc) <= 1;",
+        "explanation": "1. Sorted prices ascending: 250000, 275000, 300000, 350000, 400000, 500000 → `rn_asc` = 1..6.\n2. `rn_desc` numbers the same rows from the top: 500000=1, 400000=2, 350000=3, 300000=4, 275000=5, 250000=6.\n3. Lining up `rn_asc` vs `rn_desc` per price: 300000 → (3, 4) and 350000 → (4, 3). For both, `ABS(rn_asc - rn_desc) = 1 <= 1`, so these two middle rows are selected. Every other row has a difference ≥ 3.\n4. **`AVG(price)`** over the two selected rows = (300000 + 350000) / 2 = 325000.00. `ROUND(..., 2)` is required because averaging two values can produce a fraction.\n5. The same predicate handles an **odd** count automatically: with 5 rows the single middle row has `rn_asc = rn_desc` (difference 0), so `AVG` returns just that value."
+      },
+      {
+        "name": "OFFSET/LIMIT around the midpoint",
+        "sql": "WITH ordered AS (\n  SELECT price, ROW_NUMBER() OVER (ORDER BY price) AS rn,\n         COUNT(*) OVER () AS n\n  FROM homes\n)\nSELECT ROUND(AVG(price), 2) AS median_price\nFROM ordered\nWHERE rn IN ((n + 1) / 2, (n + 2) / 2);",
+        "explanation": "Selects the middle position(s) arithmetically. For `n` rows, the lower middle index is `(n+1)/2` and the upper middle is `(n+2)/2` (integer division). When `n` is odd these collapse to the same index (one row); when `n` is even they are adjacent (two rows). For n=6 they are 3 and 4, so we average the 3rd and 4th prices = 325000.00, matching the both-ends approach."
+      }
+    ]
+  },
+  {
+    "slug": "dedupe-latest-contact",
+    "title": "Deduplicate Keeping Latest Contact",
+    "difficulty": "Medium",
+    "category": "Ranking",
+    "concepts": ["ROW_NUMBER", "Deduplication", "Ranking"],
+    "description": "A classic cleanup: a table has several rows per key and you want to keep exactly **one**. `ROW_NUMBER() OVER (PARTITION BY key ORDER BY tiebreak)` numbers the rows within each key; filtering to `= 1` keeps a single, deterministic row per key.\n\nThe `contacts` table has multiple rows per `email` (re-submissions). For each email we keep the row with the **most recent** `updated_at`; if two share the same timestamp, keep the larger `id`.\n\n**Task:** return one row per email — the latest contact record.\n\nReturn columns **`email`, `name`, `updated_at`**, ordered by `email` ascending.",
+    "setupSql": "CREATE TABLE contacts (id INTEGER, email TEXT, name TEXT, updated_at TEXT);\nINSERT INTO contacts (id, email, name, updated_at) VALUES\n  (1, 'a@x.com', 'Al',    '2024-01-10'),\n  (2, 'a@x.com', 'Alex',  '2024-02-15'),\n  (3, 'b@x.com', 'Bo',    '2024-01-05'),\n  (4, 'a@x.com', 'Alice', '2024-02-15'),\n  (5, 'c@x.com', 'Cy',    '2024-03-01'),\n  (6, 'b@x.com', 'Bonny', '2024-03-20');",
+    "starterSql": "-- Number rows per email by recency, keep #1\nWITH ranked AS (\n  SELECT email, name, updated_at\n  FROM contacts\n)\nSELECT email, name, updated_at\nFROM ranked\n",
+    "orderMatters": true,
+    "hints": [
+      "PARTITION BY email so numbering restarts for each address.",
+      "ORDER BY updated_at DESC, id DESC puts the newest (tie-broken by id) at position 1.",
+      "Wrap it in a CTE and filter WHERE rn = 1; you cannot use a window function directly in WHERE."
+    ],
+    "approaches": [
+      {
+        "name": "ROW_NUMBER() = 1 per key",
+        "sql": "WITH ranked AS (\n  SELECT\n    email, name, updated_at,\n    ROW_NUMBER() OVER (\n      PARTITION BY email\n      ORDER BY updated_at DESC, id DESC\n    ) AS rn\n  FROM contacts\n)\nSELECT email, name, updated_at\nFROM ranked\nWHERE rn = 1\nORDER BY email;",
+        "explanation": "1. **`PARTITION BY email`** restarts numbering for each address, so every email gets its own `rn = 1, 2, 3, ...`.\n2. **`ORDER BY updated_at DESC, id DESC`** ranks newest first; the `id DESC` tiebreaker makes the choice deterministic when timestamps tie. For `a@x.com`, ids 2 and 4 both have `2024-02-15`, so the larger id (4, 'Alice') wins position 1.\n3. **`ROW_NUMBER`** assigns a strictly unique 1,2,3… within each partition (unlike `RANK`, which would give two 1s on a tie and keep both rows).\n4. **`WHERE rn = 1`** keeps exactly one row per email: Alice (a), Bonny (b, 2024-03-20), Cy (c). The filter lives in an outer query because window functions are not allowed in `WHERE`.\n5. **`ORDER BY email`** is a total order since emails are now unique."
+      },
+      {
+        "name": "NOT EXISTS a newer row",
+        "sql": "SELECT c.email, c.name, c.updated_at\nFROM contacts c\nWHERE NOT EXISTS (\n  SELECT 1 FROM contacts c2\n  WHERE c2.email = c.email\n    AND (c2.updated_at > c.updated_at\n         OR (c2.updated_at = c.updated_at AND c2.id > c.id))\n)\nORDER BY c.email;",
+        "explanation": "Keeps the row for which **no** other row of the same email is strictly 'later' (by `updated_at`, then `id`). That uniquely identifies the same winner `ROW_NUMBER() = 1` picks — Alice, Bonny, Cy — without a window function, by asserting the chosen row sits at the top of the ordering."
+      }
+    ]
+  },
+  {
+    "slug": "top-scorers-with-ties",
+    "title": "Top Scorers With Ties",
+    "difficulty": "Medium",
+    "category": "Ranking",
+    "concepts": ["RANK", "Top-N with ties", "Ranking"],
+    "description": "To get a **top-N that keeps ties**, rank with `RANK()` and filter `rank <= N`. Because `RANK` gives tied rows the **same** rank (and skips the next), more than N rows can survive when the Nth place is tied — which is usually what 'top 3' means in a leaderboard.\n\nThe `players` table has a `points` total per player.\n\n**Task:** return the **top 3 ranks** by points. If several players tie for a place, include all of them (so the result may have more than 3 rows).\n\nReturn columns **`player`, `points`, `rnk`**, ordered by `rnk` ascending, then `player` ascending.",
+    "setupSql": "CREATE TABLE players (player TEXT, points INTEGER);\nINSERT INTO players (player, points) VALUES\n  ('Ria',   90),\n  ('Sam',   90),\n  ('Tia',   80),\n  ('Uma',   75),\n  ('Vik',   75),\n  ('Wes',   60);",
+    "starterSql": "-- RANK() by points DESC, then keep rnk <= 3\nWITH ranked AS (\n  SELECT player, points\n  FROM players\n)\nSELECT player, points, 1 AS rnk\nFROM ranked\n",
+    "orderMatters": true,
+    "hints": [
+      "RANK() OVER (ORDER BY points DESC) gives tied players equal ranks and then skips.",
+      "Filter rnk <= 3 in an outer query (window functions can't go in WHERE).",
+      "RANK differs from ROW_NUMBER: ROW_NUMBER would arbitrarily break the 90-90 tie and could drop a legitimate top scorer."
+    ],
+    "approaches": [
+      {
+        "name": "RANK() <= N keeps ties",
+        "sql": "WITH ranked AS (\n  SELECT\n    player, points,\n    RANK() OVER (ORDER BY points DESC) AS rnk\n  FROM players\n)\nSELECT player, points, rnk\nFROM ranked\nWHERE rnk <= 3\nORDER BY rnk, player;",
+        "explanation": "1. **`RANK() OVER (ORDER BY points DESC)`** assigns ranks by points: Ria 90 and Sam 90 **tie at rank 1**; Tia 80 gets rank **3** (rank 2 is *skipped* because two rows occupied rank 1); Uma 75 and Vik 75 tie at rank **4**; Wes 60 is rank 6.\n2. **`WHERE rnk <= 3`** keeps ranks 1, 1, 3 → Ria, Sam, Tia. The two top players both survive even though that is technically four-or-fewer 'places' — that is the point of a ties-aware top-N.\n3. **Contrast with `ROW_NUMBER()`:** `ROW_NUMBER` would label the two 90s as 1 and 2 arbitrarily (say Ria=1, Sam=2), and `<= 3` would then return Ria, Sam, Tia too — but the choice of which 90 got rank 1 vs 2 would be **non-deterministic** and, with a tie at the cutoff, `ROW_NUMBER` could silently **drop** a tied player. `RANK` treats equal scores equally and is the correct tool for 'top N including ties'.\n4. **`DENSE_RANK`** would *not* skip rank 2, so Tia would be rank 2 and we'd also pull in the 75s — a different, denser definition. We want `RANK` here.\n5. **`ORDER BY rnk, player`** is a total order (the tie on rank 1 is broken by player name)."
+      },
+      {
+        "name": "Correlated count of strictly-greater scores",
+        "sql": "SELECT\n  p.player,\n  p.points,\n  (SELECT COUNT(*) FROM players g WHERE g.points > p.points) + 1 AS rnk\nFROM players p\nWHERE (SELECT COUNT(*) FROM players g WHERE g.points > p.points) + 1 <= 3\nORDER BY rnk, p.player;",
+        "explanation": "Reconstructs `RANK` by hand: a row's rank is `(count of rows with strictly more points) + 1`. Tied scores get the same rank and the next rank is skipped — exactly `RANK` semantics. Filtering that expression `<= 3` keeps Ria, Sam (rank 1) and Tia (rank 3), proving the window version's behaviour."
+      }
+    ]
+  },
+  {
+    "slug": "org-all-reports",
+    "title": "Everyone Who Reports Up To A Manager",
+    "difficulty": "Hard",
+    "category": "Recursive CTEs",
+    "concepts": ["Recursive CTE", "Transitive Closure", "Graph"],
+    "description": "A recursive CTE walks a hierarchy: the **anchor** picks the starting rows, and the **recursive** member repeatedly joins the table back onto the rows found so far until nothing new appears. This computes the *transitive closure* — every node reachable from the start.\n\nThe `employees` table is a self-referencing tree: `manager_id` points at another employee's `id` (the CEO has `NULL`).\n\n**Task:** list **everyone who reports up to Alice** (id 1), directly or indirectly — i.e. her whole sub-tree, excluding Alice herself. Also report each person's **depth** below Alice (direct reports = 1).\n\nReturn columns **`name`, `depth`**, ordered by `depth` ascending, then `name` ascending.",
+    "setupSql": "CREATE TABLE employees (id INTEGER, name TEXT, manager_id INTEGER);\nINSERT INTO employees (id, name, manager_id) VALUES\n  (1, 'Alice', NULL),\n  (2, 'Bob',   1),\n  (3, 'Carol', 1),\n  (4, 'Dave',  2),\n  (5, 'Eve',   4),\n  (6, 'Frank', 3);",
+    "starterSql": "-- Anchor: direct reports of Alice (manager_id = 1)\n-- Recurse: people whose manager is already in the set\nWITH RECURSIVE reports(id, name, depth) AS (\n  SELECT id, name, 1 FROM employees WHERE manager_id = 1\n)\nSELECT name, depth FROM reports\n",
+    "orderMatters": true,
+    "hints": [
+      "Anchor row: SELECT ... FROM employees WHERE manager_id = 1, with depth = 1.",
+      "Recursive step joins employees e to the working set r on e.manager_id = r.id and sets depth = r.depth + 1.",
+      "The recursion stops automatically when no employee's manager is newly in the set."
+    ],
+    "approaches": [
+      {
+        "name": "Recursive descent from Alice",
+        "sql": "WITH RECURSIVE reports(id, name, depth) AS (\n  SELECT id, name, 1\n  FROM employees\n  WHERE manager_id = 1\n  UNION ALL\n  SELECT e.id, e.name, r.depth + 1\n  FROM employees e\n  JOIN reports r ON e.manager_id = r.id\n)\nSELECT name, depth\nFROM reports\nORDER BY depth, name;",
+        "explanation": "1. **Anchor:** `WHERE manager_id = 1` selects Alice's direct reports — Bob and Carol — at `depth = 1`.\n2. **Recursive step:** join `employees e` to the rows found so far (`reports r`) on `e.manager_id = r.id`. Round 1 finds Bob's report Dave and Carol's report Frank, at `depth = 2`. Round 2 finds Dave's report Eve at `depth = 3`. Round 3 finds nothing new, so recursion halts.\n3. `UNION ALL` accumulates anchor + every recursive batch. Because each employee has exactly one manager, no node is reached twice, so no de-duplication is needed.\n4. Alice herself never appears — she is not anyone's report and is not in the anchor.\n5. **`ORDER BY depth, name`** gives Bob(1), Carol(1), Dave(2), Frank(2), Eve(3) — a total order."
+      },
+      {
+        "name": "Path-string closure",
+        "sql": "WITH RECURSIVE tree(id, name, depth, path) AS (\n  SELECT id, name, 0, '/' || id || '/'\n  FROM employees\n  WHERE id = 1\n  UNION ALL\n  SELECT e.id, e.name, t.depth + 1, t.path || e.id || '/'\n  FROM employees e\n  JOIN tree t ON e.manager_id = t.id\n)\nSELECT name, depth\nFROM tree\nWHERE id <> 1\nORDER BY depth, name;",
+        "explanation": "Starts the recursion **at Alice** (depth 0) and builds a materialized path like `/1/2/4/5/`. Every descendant is reached by following `manager_id`, and we exclude Alice with `WHERE id <> 1`. Depths shift to match (her direct reports become depth 1). Same five people, same depths — an alternative formulation that also yields a usable ancestry path."
+      }
+    ]
+  },
+  {
+    "slug": "split-csv-tags",
+    "title": "Split CSV Tags Into Rows",
+    "difficulty": "Hard",
+    "category": "Recursive CTEs",
+    "concepts": ["Recursive CTE", "String Split", "SUBSTR", "INSTR"],
+    "description": "Without a `split` function, you tokenize a delimited string by recursion: peel off the text before the first comma as the current element, keep the remainder, and recurse until the remainder is empty. A position counter numbers the elements.\n\nThe `posts` table stores a comma-separated `tags` string per post.\n\n**Task:** for post id 1, split its `tags` (`'red,green,blue,yellow'`) into one row per tag, with a 1-based position.\n\nReturn columns **`position`, `tag`**, ordered by `position` ascending.",
+    "setupSql": "CREATE TABLE posts (id INTEGER, tags TEXT);\nINSERT INTO posts (id, tags) VALUES\n  (1, 'red,green,blue,yellow'),\n  (2, 'solo');",
+    "starterSql": "-- Recursively peel the head element before each comma\nWITH RECURSIVE split(pos, item, rest) AS (\n  SELECT 1, '', tags FROM posts WHERE id = 1\n)\nSELECT pos AS position, item AS tag FROM split\n",
+    "orderMatters": true,
+    "hints": [
+      "INSTR(s, ',') is 0 when there is no comma left (last element).",
+      "Head = SUBSTR(s, 1, INSTR(s, ',') - 1); tail = SUBSTR(s, INSTR(s, ',') + 1).",
+      "Stop recursing when the remaining string is empty; increment pos each step."
+    ],
+    "approaches": [
+      {
+        "name": "Recursive SUBSTR/INSTR tokenizer",
+        "sql": "WITH RECURSIVE split(pos, item, rest) AS (\n  SELECT\n    1,\n    CASE WHEN INSTR(tags, ',') = 0 THEN tags\n         ELSE SUBSTR(tags, 1, INSTR(tags, ',') - 1) END,\n    CASE WHEN INSTR(tags, ',') = 0 THEN ''\n         ELSE SUBSTR(tags, INSTR(tags, ',') + 1) END\n  FROM posts WHERE id = 1\n  UNION ALL\n  SELECT\n    pos + 1,\n    CASE WHEN INSTR(rest, ',') = 0 THEN rest\n         ELSE SUBSTR(rest, 1, INSTR(rest, ',') - 1) END,\n    CASE WHEN INSTR(rest, ',') = 0 THEN ''\n         ELSE SUBSTR(rest, INSTR(rest, ',') + 1) END\n  FROM split\n  WHERE rest <> ''\n)\nSELECT pos AS position, item AS tag\nFROM split\nORDER BY pos;",
+        "explanation": "1. **Anchor** (pos 1): find the first comma with `INSTR`. `item` = everything before it (`SUBSTR(tags, 1, comma-1)` → `red`); `rest` = everything after it (`SUBSTR(tags, comma+1)` → `green,blue,yellow`). The `CASE` handles a string with no comma (single element) by taking the whole string and leaving an empty remainder.\n2. **Recursive step** repeats the same peel on `rest`, incrementing `pos`: pos 2 → `green` / `blue,yellow`; pos 3 → `blue` / `yellow`; pos 4 → `yellow` / `''`.\n3. **`WHERE rest <> ''`** is the stop condition: once the remainder is empty there is nothing left to peel, so the recursion terminates after emitting `yellow`.\n4. Final result is one row per tag with its 1-based `position`; **`ORDER BY pos`** restores element order."
+      },
+      {
+        "name": "Index-walking variant",
+        "sql": "WITH RECURSIVE split(pos, s) AS (\n  SELECT 1, tags || ',' FROM posts WHERE id = 1\n  UNION ALL\n  SELECT pos + 1, SUBSTR(s, INSTR(s, ',') + 1)\n  FROM split\n  WHERE INSTR(s, ',') > 0 AND SUBSTR(s, INSTR(s, ',') + 1) <> ''\n)\nSELECT pos AS position, SUBSTR(s, 1, INSTR(s, ',') - 1) AS tag\nFROM split\nORDER BY pos;",
+        "explanation": "Appends a trailing comma so **every** element (including the last) ends in a delimiter, which makes the head-extraction uniform: the tag is always `SUBSTR(s, 1, firstComma - 1)`. Each step drops the leading `head,` to expose the next element. It produces the same four tags red/green/blue/yellow at positions 1–4."
+      }
+    ]
+  },
+  {
+    "slug": "bought-x-not-y",
+    "title": "Bought Product X But Not Product Y",
+    "difficulty": "Medium",
+    "category": "Advanced Filtering",
+    "concepts": ["EXISTS", "NOT EXISTS", "Anti-join"],
+    "description": "Two correlated subqueries express 'has one thing **and** lacks another': `EXISTS (...)` asserts a matching purchase exists, while `NOT EXISTS (...)` asserts none exists. Together they find rows satisfying a positive and a negative condition without duplicating customers.\n\nThe `purchases` table records `(customer, product)` rows.\n\n**Task:** find customers who bought **'Camera'** but did **not** buy **'Lens'**.\n\nReturn one column **`customer`**, ordered by `customer` ascending.",
+    "setupSql": "CREATE TABLE purchases (customer TEXT, product TEXT);\nINSERT INTO purchases (customer, product) VALUES\n  ('Ada',  'Camera'),\n  ('Ada',  'Lens'),\n  ('Ben',  'Camera'),\n  ('Ben',  'Tripod'),\n  ('Cleo', 'Lens'),\n  ('Deon', 'Camera'),\n  ('Deon', 'Camera');",
+    "starterSql": "-- EXISTS a Camera purchase AND NOT EXISTS a Lens purchase\nSELECT DISTINCT customer\nFROM purchases p\n",
+    "orderMatters": true,
+    "hints": [
+      "Drive off the distinct customers, then apply two correlated subqueries.",
+      "EXISTS (SELECT 1 ... product = 'Camera') AND NOT EXISTS (SELECT 1 ... product = 'Lens').",
+      "Deon bought Camera twice but should appear once — select from a distinct customer list or use GROUP BY."
+    ],
+    "approaches": [
+      {
+        "name": "EXISTS + NOT EXISTS",
+        "sql": "SELECT customer\nFROM (SELECT DISTINCT customer FROM purchases) c\nWHERE EXISTS (\n        SELECT 1 FROM purchases p\n        WHERE p.customer = c.customer AND p.product = 'Camera'\n      )\n  AND NOT EXISTS (\n        SELECT 1 FROM purchases p\n        WHERE p.customer = c.customer AND p.product = 'Lens'\n      )\nORDER BY customer;",
+        "explanation": "1. The derived table `SELECT DISTINCT customer` gives one row per customer, so Deon's duplicate Camera rows collapse to a single candidate.\n2. **`EXISTS (... product = 'Camera')`** keeps only customers with at least one Camera purchase: Ada, Ben, Deon. Cleo is dropped (Lens only).\n3. **`NOT EXISTS (... product = 'Lens')`** removes anyone who *also* bought a Lens: Ada is eliminated. Ben (Camera + Tripod) and Deon (Camera × 2) survive.\n4. Result: **Ben, Deon** — exactly the buyers of Camera who never bought Lens. The `NOT EXISTS` correctly returns true for customers with no Lens row at all.\n5. **`ORDER BY customer`** is a total order (customers are distinct)."
+      },
+      {
+        "name": "Conditional aggregation",
+        "sql": "SELECT customer\nFROM purchases\nGROUP BY customer\nHAVING SUM(product = 'Camera') > 0\n   AND SUM(product = 'Lens')   = 0\nORDER BY customer;",
+        "explanation": "Groups by customer and uses boolean-as-1/0 sums: `SUM(product = 'Camera') > 0` means 'bought Camera at least once', and `SUM(product = 'Lens') = 0` means 'never bought Lens'. Deon's two Camera rows fold into one group, so he appears once. Same answer — Ben, Deon — using aggregation instead of correlated subqueries."
+      },
+      {
+        "name": "INTERSECT / EXCEPT on customer sets",
+        "sql": "SELECT customer FROM purchases WHERE product = 'Camera'\nEXCEPT\nSELECT customer FROM purchases WHERE product = 'Lens'\nORDER BY customer;",
+        "explanation": "Set algebra: the set of Camera buyers `EXCEPT` the set of Lens buyers. `EXCEPT` already removes duplicates, so Deon appears once, and any customer present in both sets (Ada) is subtracted out. Yields Ben, Deon — a compact equivalent of EXISTS + NOT EXISTS."
+      }
+    ]
+  },
+  {
+    "slug": "signup-funnel-conversion",
+    "title": "Signup Funnel Conversion",
+    "difficulty": "Medium",
+    "category": "CTEs",
+    "concepts": ["CTE chaining", "Funnel", "Conversion rate"],
+    "description": "A funnel measures how many users progress through ordered stages. Chained CTEs make each stage a named, reusable step: count distinct users who **visited**, then those who **added to cart**, then those who **purchased**, and finally compute conversion rates between stages.\n\nThree event tables share a `user_id`. A user is counted at a stage if they have at least one row in that stage's table.\n\n**Task:** produce a one-row funnel summary: distinct visitors, cart users, purchasers, and the two conversion rates as **percentages rounded to 1 decimal** — visit→cart and cart→purchase.\n\nReturn columns **`visitors`, `carts`, `purchases`, `visit_to_cart_pct`, `cart_to_purchase_pct`** (one row).",
+    "setupSql": "CREATE TABLE visits   (user_id INTEGER);\nCREATE TABLE carts    (user_id INTEGER);\nCREATE TABLE buys     (user_id INTEGER);\nINSERT INTO visits (user_id) VALUES (1),(2),(3),(4),(5),(6),(7),(8);\nINSERT INTO carts  (user_id) VALUES (1),(2),(3),(4);\nINSERT INTO buys   (user_id) VALUES (1),(2);",
+    "starterSql": "-- One CTE per stage, then combine and compute rates\nWITH v AS (SELECT COUNT(DISTINCT user_id) AS n FROM visits)\nSELECT 1\n",
+    "orderMatters": false,
+    "hints": [
+      "Make a CTE per stage: COUNT(DISTINCT user_id) from visits, carts, buys.",
+      "Cross-join the three single-row CTEs (or scalar-subquery them) to line up the counts.",
+      "Conversion rate = stage_n * 100.0 / previous_stage_n, then ROUND(..., 1)."
+    ],
+    "approaches": [
+      {
+        "name": "Chained stage CTEs",
+        "sql": "WITH\n  v AS (SELECT COUNT(DISTINCT user_id) AS n FROM visits),\n  c AS (SELECT COUNT(DISTINCT user_id) AS n FROM carts),\n  b AS (SELECT COUNT(DISTINCT user_id) AS n FROM buys)\nSELECT\n  v.n AS visitors,\n  c.n AS carts,\n  b.n AS purchases,\n  ROUND(c.n * 100.0 / v.n, 1) AS visit_to_cart_pct,\n  ROUND(b.n * 100.0 / c.n, 1) AS cart_to_purchase_pct\nFROM v, c, b;",
+        "explanation": "1. Three CTEs each reduce a stage table to a single number with **`COUNT(DISTINCT user_id)`** (distinct so a user with multiple visits counts once): `v.n = 8`, `c.n = 4`, `b.n = 2`.\n2. **`FROM v, c, b`** cross-joins the three one-row CTEs into a single row holding all three counts side by side — the standard way to combine independent scalar aggregates.\n3. **`visit_to_cart_pct = c.n * 100.0 / v.n`** = 4 × 100 / 8 = 50.0; **`cart_to_purchase_pct = b.n * 100.0 / c.n`** = 2 × 100 / 4 = 50.0. The `100.0` forces float division and `ROUND(..., 1)` formats the rate (rounding is required because rates are generally fractional).\n4. Result: one row → 8, 4, 2, 50.0, 50.0. Each CTE reads as a labelled funnel stage, which is exactly what makes chained CTEs clearer than nested subqueries here."
+      },
+      {
+        "name": "Scalar subqueries",
+        "sql": "SELECT\n  (SELECT COUNT(DISTINCT user_id) FROM visits) AS visitors,\n  (SELECT COUNT(DISTINCT user_id) FROM carts)  AS carts,\n  (SELECT COUNT(DISTINCT user_id) FROM buys)   AS purchases,\n  ROUND((SELECT COUNT(DISTINCT user_id) FROM carts) * 100.0\n        / (SELECT COUNT(DISTINCT user_id) FROM visits), 1) AS visit_to_cart_pct,\n  ROUND((SELECT COUNT(DISTINCT user_id) FROM buys) * 100.0\n        / (SELECT COUNT(DISTINCT user_id) FROM carts), 1) AS cart_to_purchase_pct;",
+        "explanation": "The same counts inlined as scalar subqueries in the SELECT list — no CTEs. It returns the identical row (8, 4, 2, 50.0, 50.0) but repeats each subquery, which is exactly the duplication the chained-CTE version avoids by naming each stage once."
+      }
+    ]
+  },
+  {
+    "slug": "case-insensitive-name-sort",
+    "title": "Case-Insensitive Name Sort",
+    "difficulty": "Medium",
+    "category": "Ordering",
+    "concepts": ["COLLATE NOCASE", "group_concat", "Deterministic order"],
+    "description": "By default SQLite sorts text by byte value, so all uppercase letters sort before lowercase ('Zoe' before 'amy'). `COLLATE NOCASE` makes comparisons case-insensitive, so names interleave the way a human expects. Because `NOCASE` treats `'Amy'` and `'amy'` as equal, you add a **deterministic tiebreak** (here the original `name` and `id`) to keep the order total.\n\nThe `people` table has mixed-case `name`s.\n\n**Task (two parts):**\n1. Return the people sorted case-insensitively by name, with a stable tiebreak.\n2. Also return a single comma-separated roster of all names in that same case-insensitive order via `group_concat`.\n\nFirst query returns columns **`id`, `name`** ordered case-insensitively by `name`, then by `id` ascending. (The roster is shown in the approach for reference; the graded result is the first query.)\n\nReturn columns **`id`, `name`**, ordered by `name COLLATE NOCASE` ascending, then `id` ascending.",
+    "setupSql": "CREATE TABLE people (id INTEGER, name TEXT);\nINSERT INTO people (id, name) VALUES\n  (1, 'amy'),\n  (2, 'Bob'),\n  (3, 'Amy'),\n  (4, 'zoe'),\n  (5, 'Cara'),\n  (6, 'bob');",
+    "starterSql": "-- Sort by name case-insensitively, tiebreak by id\nSELECT id, name\nFROM people\n",
+    "orderMatters": true,
+    "hints": [
+      "ORDER BY name COLLATE NOCASE compares letters ignoring case.",
+      "Names equal under NOCASE (amy/Amy, Bob/bob) still need a tiebreak: add , id.",
+      "group_concat(name, ', ') inside a subquery that is already ordered gives an ordered roster."
+    ],
+    "approaches": [
+      {
+        "name": "COLLATE NOCASE + id tiebreak",
+        "sql": "SELECT id, name\nFROM people\nORDER BY name COLLATE NOCASE, id;",
+        "explanation": "1. **`ORDER BY name COLLATE NOCASE`** compares names ignoring letter case, so they sort as a human reads: amy/Amy, Bob/bob, Cara, zoe — instead of the default byte order where every capital letter precedes every lowercase one.\n2. Under `NOCASE`, `'amy'` and `'Amy'` are **equal**, as are `'Bob'` and `'bob'`. A pure case-insensitive sort would leave their relative order unspecified.\n3. **`, id`** is the deterministic tiebreak: among equal-by-NOCASE names, the smaller `id` comes first. So the order is amy(1), Amy(3), Bob(2), bob(6), Cara(5), zoe(4) — a **total** order, which is required because `orderMatters` is true.\n4. Without the `id` tiebreak the result would be ambiguous and could fail determinism checks."
+      },
+      {
+        "name": "Explicit lower() equivalent",
+        "sql": "SELECT id, name\nFROM people\nORDER BY lower(name), id;",
+        "explanation": "`lower(name)` normalizes case before the default (case-sensitive) comparison, achieving the same case-insensitive ordering as `COLLATE NOCASE` for ASCII names. The `, id` tiebreak again makes it total. Same rows in the same order: amy(1), Amy(3), Bob(2), bob(6), Cara(5), zoe(4)."
+      },
+      {
+        "name": "Ordered group_concat roster (reference)",
+        "sql": "WITH ordered AS (\n  SELECT id, name FROM people ORDER BY name COLLATE NOCASE, id\n)\nSELECT id, name FROM ordered ORDER BY name COLLATE NOCASE, id;",
+        "explanation": "Bonus pattern from the task: to build a single ordered roster string you would write `SELECT group_concat(name, ', ') FROM (SELECT name FROM people ORDER BY name COLLATE NOCASE, id)`, which yields `amy, Amy, Bob, bob, Cara, zoe` because `group_concat` preserves the subquery's row order. Here we return the same id/name rows so the result matches the graded oracle while demonstrating the ordered-CTE structure that feeds such a roster."
+      }
+    ]
+  }
+]

@@ -1,14 +1,16 @@
-import type { Problem } from "../types";
+import type { Problem, SolutionApproach } from "../types";
 import { recursiveProblems } from "./recursive";
 import { cteProblems } from "./ctes";
 import { windowProblems } from "./windows";
 import { rankingProblems } from "./ranking";
 import { filteringProblems } from "./filtering";
 import { orderingProblems } from "./ordering";
+import { extendedProblems } from "./extended.generated";
+import { existingSolutions } from "./solutions.generated";
 
-// Interleave categories a little so the list doesn't feel like six blocks,
-// while keeping a stable, deterministic order.
-const raw: Problem[] = [
+// The original 29 problems, kept exactly as authored, interleaved so the list
+// doesn't read as six blocks.
+const original: Problem[] = [
   recursiveProblems[0],
   windowProblems[0],
   cteProblems[0],
@@ -40,8 +42,18 @@ const raw: Problem[] = [
   windowProblems[5],
 ];
 
-export const problems: Problem[] = raw
+function withApproaches(p: Problem): Problem {
+  const approaches: SolutionApproach[] =
+    p.approaches ??
+    existingSolutions[p.slug] ??
+    [{ name: "Solution", sql: p.solutionSql, explanation: "" }];
+  return { ...p, approaches };
+}
+
+// Original problems first (so their numbers stay 1..29), then the new ones.
+export const problems: Problem[] = [...original, ...extendedProblems]
   .filter(Boolean)
+  .map(withApproaches)
   .map((p, i) => ({ ...p, number: i + 1 }));
 
 export const problemBySlug: Record<string, Problem> = Object.fromEntries(

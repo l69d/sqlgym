@@ -1,0 +1,281 @@
+[
+  {
+    "slug": "build-full-name",
+    "title": "Build a Full Name",
+    "difficulty": "Easy",
+    "category": "String Manipulation",
+    "concepts": ["concatenation", "||"],
+    "description": "The `||` operator glues two strings together. To put a literal space between two columns you concatenate three pieces: the first column, a space literal `' '`, and the second column.\n\n**Task:** for each employee return `id` and a `full_name` column equal to `first_name || ' ' || last_name`. Order by `id`.\n\nOutput columns, in order: `id`, `full_name`.",
+    "setupSql": "CREATE TABLE employees (id INTEGER, first_name TEXT, last_name TEXT);\nINSERT INTO employees (id, first_name, last_name) VALUES\n  (1, 'Ada', 'Lovelace'),\n  (2, 'Alan', 'Turing'),\n  (3, 'Grace', 'Hopper'),\n  (4, 'Linus', 'Torvalds');",
+    "starterSql": "-- concatenate first_name, a space, then last_name\nSELECT id,\n       ... AS full_name\nFROM employees\nORDER BY id;\n",
+    "orderMatters": true,
+    "hints": [
+      "`||` is SQLite's string concatenation operator: `'a' || 'b'` is `'ab'`.",
+      "You need three pieces: first_name, the literal `' '`, and last_name."
+    ],
+    "approaches": [
+      {
+        "name": "concatenate with ||",
+        "sql": "SELECT id,\n       first_name || ' ' || last_name AS full_name\nFROM employees\nORDER BY id;",
+        "explanation": "1. `first_name || ' '` appends a single space to the first name, e.g. `'Ada '`.\n2. Concatenating `|| last_name` then appends the surname, giving `'Ada Lovelace'`.\n3. The whole expression is aliased `full_name`.\n4. `ORDER BY id` gives a stable total order."
+      }
+    ]
+  },
+  {
+    "slug": "email-domain-extract",
+    "title": "Extract the Email Domain",
+    "difficulty": "Medium",
+    "category": "String Manipulation",
+    "concepts": ["substr", "instr"],
+    "description": "There is no `SPLIT_PART` in SQLite, so to grab the part of an email after the `@` you combine `instr` and `substr`. `instr(email,'@')` returns the 1-based position of the `@`; everything after it starts one character later.\n\n**Task:** for each user return `id`, `email`, and `domain` — the substring of `email` after the `@` sign. Use `substr(email, instr(email,'@') + 1)` (the two-argument `substr` returns from a start position to the end of the string). Order by `id`.\n\nOutput columns, in order: `id`, `email`, `domain`.",
+    "setupSql": "CREATE TABLE users (id INTEGER, email TEXT);\nINSERT INTO users (id, email) VALUES\n  (1, 'ada@calc.org'),\n  (2, 'alan@bletchley.uk'),\n  (3, 'grace@navy.mil'),\n  (4, 'linus@kernel.dev');",
+    "starterSql": "-- find the @ with instr, then substr everything after it\nSELECT id, email,\n       ... AS domain\nFROM users\nORDER BY id;\n",
+    "orderMatters": true,
+    "hints": [
+      "`instr('ada@calc.org','@')` returns 4 — the position of the @.",
+      "`substr(s, start)` with two arguments returns from `start` to the end, so start at `instr(...) + 1`."
+    ],
+    "approaches": [
+      {
+        "name": "instr + substr",
+        "sql": "SELECT id, email,\n       substr(email, instr(email, '@') + 1) AS domain\nFROM users\nORDER BY id;",
+        "explanation": "1. `instr(email,'@')` returns the 1-based index of the `@` character, e.g. `4` in `'ada@calc.org'`.\n2. Adding `1` moves to the first character of the domain (`'c'`... the start of `calc.org`).\n3. `substr(email, start)` with only a start position returns everything from that index to the end of the string, giving `'calc.org'`.\n4. `ORDER BY id` gives a stable total order."
+      }
+    ]
+  },
+  {
+    "slug": "case-insensitive-search",
+    "title": "Case-Insensitive Product Search",
+    "difficulty": "Easy",
+    "category": "String Manipulation",
+    "concepts": ["lower", "LIKE"],
+    "description": "A search box should match regardless of capitalisation. Lower-casing both the column and the search term makes the comparison case-insensitive in a portable way.\n\n**Task:** return `id` and `name` for every product whose `name` contains the word `pro` in any casing. Use `lower(name) LIKE '%pro%'`. Order by `id`.\n\nOutput columns, in order: `id`, `name`.",
+    "setupSql": "CREATE TABLE products (id INTEGER, name TEXT);\nINSERT INTO products (id, name) VALUES\n  (1, 'iPhone PRO'),\n  (2, 'Budget Phone'),\n  (3, 'ProBook Laptop'),\n  (4, 'Studio Display'),\n  (5, 'AirPods pro');",
+    "starterSql": "-- lower() both sides so casing does not matter\nSELECT id, name\nFROM products\nWHERE ...\nORDER BY id;\n",
+    "orderMatters": true,
+    "hints": [
+      "`lower('iPhone PRO')` is `'iphone pro'`, which matches `'%pro%'`.",
+      "Wrap the column in `lower(...)` and compare to an all-lowercase pattern."
+    ],
+    "approaches": [
+      {
+        "name": "lower() + LIKE",
+        "sql": "SELECT id, name\nFROM products\nWHERE lower(name) LIKE '%pro%'\nORDER BY id;",
+        "explanation": "1. `lower(name)` folds every product name to lowercase, so `'iPhone PRO'`, `'ProBook Laptop'` and `'AirPods pro'` all become forms containing `'pro'`.\n2. `LIKE '%pro%'` matches when `'pro'` appears anywhere (the `%` wildcards match any text before and after).\n3. Rows without `pro` (`'Budget Phone'`, `'Studio Display'`) are filtered out.\n4. `ORDER BY id` gives a stable total order."
+      }
+    ]
+  },
+  {
+    "slug": "mask-phone-numbers",
+    "title": "Clean Phone Numbers with replace",
+    "difficulty": "Easy",
+    "category": "String Manipulation",
+    "concepts": ["replace"],
+    "description": "`replace(s, find, with)` swaps every occurrence of a substring. Nesting `replace` calls lets you strip several unwanted characters in one expression.\n\n**Task:** for each contact return `id`, the original `phone`, and `clean` — the phone number with spaces, dashes (`-`) and parentheses removed, leaving only digits. Apply `replace` four times (remove `' '`, `'-'`, `'('`, `')'`). Order by `id`.\n\nOutput columns, in order: `id`, `phone`, `clean`.",
+    "setupSql": "CREATE TABLE contacts (id INTEGER, phone TEXT);\nINSERT INTO contacts (id, phone) VALUES\n  (1, '(555) 123-4567'),\n  (2, '555-987-6543'),\n  (3, '(800) 555 0199'),\n  (4, '212 867 5309');",
+    "starterSql": "-- nest replace() once per unwanted character\nSELECT id, phone,\n       ... AS clean\nFROM contacts\nORDER BY id;\n",
+    "orderMatters": true,
+    "hints": [
+      "`replace('a-b','-','')` is `'ab'` — the third argument is an empty string.",
+      "Nest the calls: replace the result of one replace inside the next."
+    ],
+    "approaches": [
+      {
+        "name": "nested replace",
+        "sql": "SELECT id, phone,\n       replace(replace(replace(replace(phone, ' ', ''), '-', ''), '(', ''), ')', '') AS clean\nFROM contacts\nORDER BY id;",
+        "explanation": "1. The innermost `replace(phone, ' ', '')` removes every space.\n2. The next `replace(..., '-', '')` removes dashes from that result.\n3. Two more `replace` calls strip `'('` and `')'`.\n4. Each call's third argument is the empty string `''`, so the matched characters are deleted rather than swapped, leaving only digits.\n5. `ORDER BY id` gives a stable total order."
+      }
+    ]
+  },
+  {
+    "slug": "count-commas",
+    "title": "Count Items in a CSV Field",
+    "difficulty": "Medium",
+    "category": "String Manipulation",
+    "concepts": ["length", "replace"],
+    "description": "SQLite has no array type, but you can count how many times a character appears with the length trick: `length(s) - length(replace(s, ch, ''))` is the number of occurrences of `ch`. For a comma-separated list the item count is the comma count plus one.\n\n**Task:** each `tags` value is a non-empty comma-separated list. Return `id`, `tags`, and `item_count` — the number of items, computed as `length(tags) - length(replace(tags, ',', '')) + 1`. Order by `id`.\n\nOutput columns, in order: `id`, `tags`, `item_count`.",
+    "setupSql": "CREATE TABLE rows_tags (id INTEGER, tags TEXT);\nINSERT INTO rows_tags (id, tags) VALUES\n  (1, 'red'),\n  (2, 'red,green'),\n  (3, 'red,green,blue'),\n  (4, 'a,b,c,d,e');",
+    "starterSql": "-- comma count = length - length(without commas); items = commas + 1\nSELECT id, tags,\n       ... AS item_count\nFROM rows_tags\nORDER BY id;\n",
+    "orderMatters": true,
+    "hints": [
+      "`length('a,b') - length(replace('a,b',',',''))` is `3 - 2 = 1` comma.",
+      "Number of items is the number of commas plus one."
+    ],
+    "approaches": [
+      {
+        "name": "length minus length(replace)",
+        "sql": "SELECT id, tags,\n       length(tags) - length(replace(tags, ',', '')) + 1 AS item_count\nFROM rows_tags\nORDER BY id;",
+        "explanation": "1. `replace(tags, ',', '')` deletes every comma, so its `length` is the original length minus the number of commas.\n2. `length(tags) - length(replace(tags, ',', ''))` is therefore exactly the comma count.\n3. A comma-separated list of N items has N-1 separators, so adding `+ 1` recovers the item count.\n4. `ORDER BY id` gives a stable total order."
+      }
+    ]
+  },
+  {
+    "slug": "format-price-printf",
+    "title": "Format Prices with printf",
+    "difficulty": "Medium",
+    "category": "String Manipulation",
+    "concepts": ["printf"],
+    "description": "`printf` builds formatted strings using C-style format codes: `%.2f` formats a number with two decimals, `%-10s` left-pads a string to width 10, and a literal `$` is just written as-is.\n\n**Task:** for each product return `id` and a `label` column of the form `'<name padded to 10> $<price with 2 decimals>'`, built with `printf('%-10s $%.2f', name, price)`. Order by `id`.\n\nOutput columns, in order: `id`, `label`.",
+    "setupSql": "CREATE TABLE catalog (id INTEGER, name TEXT, price REAL);\nINSERT INTO catalog (id, name, price) VALUES\n  (1, 'Pen', 1.5),\n  (2, 'Notebook', 4),\n  (3, 'Stapler', 12.95),\n  (4, 'Marker', 0.99);",
+    "starterSql": "-- printf with %-10s for the padded name and %.2f for the price\nSELECT id,\n       ... AS label\nFROM catalog\nORDER BY id;\n",
+    "orderMatters": true,
+    "hints": [
+      "`printf('%.2f', 4)` gives `'4.00'`.",
+      "`%-10s` left-justifies the name in a 10-character field, padding with spaces on the right."
+    ],
+    "approaches": [
+      {
+        "name": "printf format string",
+        "sql": "SELECT id,\n       printf('%-10s $%.2f', name, price) AS label\nFROM catalog\nORDER BY id;",
+        "explanation": "1. `%-10s` formats `name` as a string left-justified in a field 10 characters wide, padding the right with spaces (so short names line up).\n2. The literal ` $` is copied verbatim into the output.\n3. `%.2f` formats `price` as a fixed-point number with exactly two decimals, so `4` becomes `'4.00'` and `1.5` becomes `'1.50'`.\n4. `printf` substitutes `name` and `price` in order, producing e.g. `'Pen        $1.50'`.\n5. `ORDER BY id` gives a stable total order."
+      }
+    ]
+  },
+  {
+    "slug": "quarterly-sales-pivot",
+    "title": "Pivot Quarterly Sales into Columns",
+    "difficulty": "Medium",
+    "category": "Pivoting",
+    "concepts": ["conditional aggregation", "SUM", "CASE"],
+    "description": "To turn rows into columns you use conditional aggregation: `SUM(CASE WHEN quarter='Q1' THEN amount END)` adds up only the Q1 rows and produces `NULL` (treated as 0 by SUM across the group) for the rest, collapsing one `quarter` column into four named columns.\n\n**Task:** the `sales` table has one row per product per quarter. Pivot it so each product is a single row with its quarterly totals. Return `product`, `q1`, `q2`, `q3`, `q4`. Order by `product`.\n\nOutput columns, in order: `product`, `q1`, `q2`, `q3`, `q4`.",
+    "setupSql": "CREATE TABLE sales (product TEXT, quarter TEXT, amount INTEGER);\nINSERT INTO sales (product, quarter, amount) VALUES\n  ('Widget', 'Q1', 100), ('Widget', 'Q2', 150), ('Widget', 'Q3', 120), ('Widget', 'Q4', 200),\n  ('Gadget', 'Q1', 80),  ('Gadget', 'Q2', 90),  ('Gadget', 'Q3', 70),  ('Gadget', 'Q4', 110),\n  ('Gizmo',  'Q1', 60),  ('Gizmo',  'Q3', 65),  ('Gizmo',  'Q4', 50);",
+    "starterSql": "-- one SUM(CASE WHEN quarter='Qx' ...) per quarter, grouped by product\nSELECT product,\n       ... AS q1,\n       ... AS q2,\n       ... AS q3,\n       ... AS q4\nFROM sales\nGROUP BY product\nORDER BY product;\n",
+    "orderMatters": true,
+    "hints": [
+      "Use one `SUM(CASE WHEN quarter='Q1' THEN amount END)` per quarter.",
+      "`GROUP BY product` makes one output row per product.",
+      "Gizmo has no Q2 row, so its q2 sums to NULL."
+    ],
+    "approaches": [
+      {
+        "name": "SUM(CASE ...) pivot",
+        "sql": "SELECT product,\n       SUM(CASE WHEN quarter = 'Q1' THEN amount END) AS q1,\n       SUM(CASE WHEN quarter = 'Q2' THEN amount END) AS q2,\n       SUM(CASE WHEN quarter = 'Q3' THEN amount END) AS q3,\n       SUM(CASE WHEN quarter = 'Q4' THEN amount END) AS q4\nFROM sales\nGROUP BY product\nORDER BY product;",
+        "explanation": "1. `GROUP BY product` collapses all of a product's quarterly rows into one group.\n2. Inside the group, `CASE WHEN quarter='Q1' THEN amount END` yields the amount only on the Q1 row and `NULL` everywhere else; `SUM` of that is the Q1 total. This is the heart of a pivot: one `quarter` column becomes four named columns.\n3. The same pattern for Q2/Q3/Q4 produces the other three columns.\n4. Gizmo has no Q2 row, so every `CASE` for it is `NULL` and `SUM(NULL)` is `NULL` — the cell is empty.\n5. `ORDER BY product` gives a stable total order."
+      }
+    ]
+  },
+  {
+    "slug": "order-status-count-pivot",
+    "title": "Pivot Order Status Counts",
+    "difficulty": "Medium",
+    "category": "Pivoting",
+    "concepts": ["conditional aggregation", "COUNT", "SUM"],
+    "description": "Pivoting with a count uses `SUM(CASE WHEN status='X' THEN 1 ELSE 0 END)` — each matching row contributes 1, each other row contributes 0, so the sum is the number of rows with that status. This turns the `status` column into one count column per status value.\n\n**Task:** the `orders` table has one row per order. For each customer, count their orders in each status. Return `customer`, `shipped`, `pending`, `cancelled` (counts; use `ELSE 0` so a customer with none of a status shows `0`, not NULL). Order by `customer`.\n\nOutput columns, in order: `customer`, `shipped`, `pending`, `cancelled`.",
+    "setupSql": "CREATE TABLE orders (customer TEXT, status TEXT);\nINSERT INTO orders (customer, status) VALUES\n  ('Alice', 'shipped'), ('Alice', 'shipped'), ('Alice', 'pending'),\n  ('Bob', 'cancelled'), ('Bob', 'shipped'),\n  ('Carol', 'pending'), ('Carol', 'pending'), ('Carol', 'cancelled');",
+    "starterSql": "-- SUM(CASE WHEN status='x' THEN 1 ELSE 0 END) per status, grouped by customer\nSELECT customer,\n       ... AS shipped,\n       ... AS pending,\n       ... AS cancelled\nFROM orders\nGROUP BY customer\nORDER BY customer;\n",
+    "orderMatters": true,
+    "hints": [
+      "Use `ELSE 0` so absent statuses count as 0 rather than NULL.",
+      "`SUM(CASE WHEN status='shipped' THEN 1 ELSE 0 END)` counts shipped orders.",
+      "`GROUP BY customer` gives one row per customer."
+    ],
+    "approaches": [
+      {
+        "name": "SUM(CASE ... 1 ELSE 0) pivot",
+        "sql": "SELECT customer,\n       SUM(CASE WHEN status = 'shipped' THEN 1 ELSE 0 END) AS shipped,\n       SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,\n       SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled\nFROM orders\nGROUP BY customer\nORDER BY customer;",
+        "explanation": "1. `GROUP BY customer` makes one group per customer.\n2. `CASE WHEN status='shipped' THEN 1 ELSE 0 END` emits 1 for each shipped order and 0 otherwise; `SUM` over the group counts shipped orders. The `status` column is thereby spread across three count columns.\n3. The same pattern counts `pending` and `cancelled`.\n4. Because of `ELSE 0`, a customer with no orders of a status gets `0` (e.g. Alice's `cancelled` is 0), not NULL.\n5. `ORDER BY customer` gives a stable total order."
+      },
+      {
+        "name": "COUNT(CASE ... ) pivot",
+        "sql": "SELECT customer,\n       COUNT(CASE WHEN status = 'shipped' THEN 1 END) AS shipped,\n       COUNT(CASE WHEN status = 'pending' THEN 1 END) AS pending,\n       COUNT(CASE WHEN status = 'cancelled' THEN 1 END) AS cancelled\nFROM orders\nGROUP BY customer\nORDER BY customer;",
+        "explanation": "1. `COUNT(x)` counts only non-NULL values, so `CASE WHEN status='shipped' THEN 1 END` (with no `ELSE`) yields 1 on matches and NULL otherwise — and `COUNT` skips the NULLs.\n2. This counts each status without needing `ELSE 0`, and a missing status naturally counts as 0 because `COUNT` of all-NULL is 0.\n3. The result is identical to the `SUM(... ELSE 0)` form.\n4. `ORDER BY customer` gives a stable total order."
+      }
+    ]
+  },
+  {
+    "slug": "unpivot-scores",
+    "title": "Unpivot Subject Scores into Rows",
+    "difficulty": "Medium",
+    "category": "Pivoting",
+    "concepts": ["UNION ALL", "unpivot"],
+    "description": "The reverse of pivoting turns columns into rows. With no native `UNPIVOT`, you `SELECT` each column as a `(label, value)` pair and stack the selects with `UNION ALL`.\n\n**Task:** the `report` table stores one row per student with three subject columns. Unpivot it so there is one row per student per subject. Return `student`, `subject`, `score`, where `subject` is the literal `'math'`, `'science'`, or `'english'`. Order by `student`, then by `subject`.\n\nOutput columns, in order: `student`, `subject`, `score`.",
+    "setupSql": "CREATE TABLE report (student TEXT, math INTEGER, science INTEGER, english INTEGER);\nINSERT INTO report (student, math, science, english) VALUES\n  ('Ada', 90, 85, 70),\n  ('Bob', 60, 75, 95),\n  ('Cal', 88, 88, 88);",
+    "starterSql": "-- one SELECT per subject column, stacked with UNION ALL\nSELECT student, 'math' AS subject, math AS score FROM report\nUNION ALL\n-- ... science, english\nORDER BY student, subject;\n",
+    "orderMatters": true,
+    "hints": [
+      "Write one `SELECT student, 'math' AS subject, math AS score FROM report` per subject.",
+      "Join the three selects with `UNION ALL`.",
+      "A single `ORDER BY student, subject` at the end orders the combined result."
+    ],
+    "approaches": [
+      {
+        "name": "UNION ALL unpivot",
+        "sql": "SELECT student, 'math' AS subject, math AS score FROM report\nUNION ALL\nSELECT student, 'science' AS subject, science AS score FROM report\nUNION ALL\nSELECT student, 'english' AS subject, english AS score FROM report\nORDER BY student, subject;",
+        "explanation": "1. Each `SELECT` reads the table once, keeping `student`, hard-coding the `subject` label, and exposing one subject column as `score`.\n2. `UNION ALL` stacks the three result sets on top of each other (it keeps duplicates, unlike `UNION`), producing 3 rows per student.\n3. The single trailing `ORDER BY student, subject` applies to the whole stacked result, giving a deterministic row order (subjects sort alphabetically: english, math, science).\n4. With distinct students and a fixed subject set this is a total order."
+      }
+    ]
+  },
+  {
+    "slug": "skill-presence-matrix",
+    "title": "Binary Skill Presence Matrix",
+    "difficulty": "Hard",
+    "category": "Pivoting",
+    "concepts": ["conditional aggregation", "MAX", "CASE", "binary matrix"],
+    "description": "A presence matrix shows 1/0 for whether each entity has each attribute. Use `MAX(CASE WHEN attr='X' THEN 1 ELSE 0 END)` per attribute: `MAX` returns 1 if any matching row exists in the group and 0 otherwise — a boolean OR across the group.\n\n**Task:** the `person_skill` table lists which skills each person has (zero or more rows each). Build a matrix with one row per person and a 1/0 column for each skill `'sql'`, `'python'`, `'excel'`. Return `person`, `sql`, `python`, `excel`. Every person in `people` must appear, even with no skills (all zeros), so start from `people` and LEFT JOIN. Order by `person`.\n\nOutput columns, in order: `person`, `sql`, `python`, `excel`.",
+    "setupSql": "CREATE TABLE people (person TEXT);\nINSERT INTO people (person) VALUES ('Ana'), ('Ben'), ('Cy');\nCREATE TABLE person_skill (person TEXT, skill TEXT);\nINSERT INTO person_skill (person, skill) VALUES\n  ('Ana', 'sql'), ('Ana', 'python'),\n  ('Ben', 'sql'), ('Ben', 'excel'), ('Ben', 'python');",
+    "starterSql": "-- LEFT JOIN people to person_skill, then MAX(CASE...) per skill\nSELECT p.person,\n       ... AS sql,\n       ... AS python,\n       ... AS excel\nFROM people p\nLEFT JOIN person_skill s ON s.person = p.person\nGROUP BY p.person\nORDER BY p.person;\n",
+    "orderMatters": true,
+    "hints": [
+      "`MAX(CASE WHEN skill='sql' THEN 1 ELSE 0 END)` is 1 if the person has SQL, else 0.",
+      "LEFT JOIN from `people` so a skill-less person (Cy) still appears with all zeros.",
+      "Quote the `sql` alias if needed, but as a bare column alias it is fine."
+    ],
+    "approaches": [
+      {
+        "name": "MAX(CASE ...) presence",
+        "sql": "SELECT p.person,\n       MAX(CASE WHEN s.skill = 'sql' THEN 1 ELSE 0 END) AS sql,\n       MAX(CASE WHEN s.skill = 'python' THEN 1 ELSE 0 END) AS python,\n       MAX(CASE WHEN s.skill = 'excel' THEN 1 ELSE 0 END) AS excel\nFROM people p\nLEFT JOIN person_skill s ON s.person = p.person\nGROUP BY p.person\nORDER BY p.person;",
+        "explanation": "1. The `LEFT JOIN` keeps every person from `people`; a person with no skills (Cy) gets one row with `s.skill = NULL`.\n2. `GROUP BY p.person` makes one output row per person.\n3. `CASE WHEN s.skill='sql' THEN 1 ELSE 0 END` is 1 on the SQL row and 0 elsewhere; `MAX` over the group is 1 if any row matched, else 0 — a presence flag. This collapses the variable-length skill list into fixed 1/0 columns.\n4. For Cy every `CASE` is 0 (its only row has NULL skill), so all flags are 0.\n5. `ORDER BY p.person` gives a stable total order."
+      }
+    ]
+  },
+  {
+    "slug": "monthly-revenue-pivot-total",
+    "title": "Pivot Months then Add a Total",
+    "difficulty": "Hard",
+    "category": "Pivoting",
+    "concepts": ["conditional aggregation", "SUM", "derived column"],
+    "description": "After pivoting you can compute a derived column from the pivoted values. Here you pivot revenue into per-month columns and then add a `total` that sums them.\n\n**Task:** the `revenue` table has one row per region per month (`'Jan'`, `'Feb'`, `'Mar'`). Pivot it to one row per region with columns `jan`, `feb`, `mar`, then add `total = jan + feb + mar`. Every region has all three months, so no NULL handling is needed. Return `region`, `jan`, `feb`, `mar`, `total`. Order by `region`.\n\nOutput columns, in order: `region`, `jan`, `feb`, `mar`, `total`.",
+    "setupSql": "CREATE TABLE revenue (region TEXT, month TEXT, amount INTEGER);\nINSERT INTO revenue (region, month, amount) VALUES\n  ('East', 'Jan', 100), ('East', 'Feb', 120), ('East', 'Mar', 130),\n  ('West', 'Jan', 90),  ('West', 'Feb', 95),  ('West', 'Mar', 105),\n  ('North','Jan', 70),  ('North','Feb', 80),  ('North','Mar', 60);",
+    "starterSql": "-- pivot months, then SUM the three month expressions for total\nSELECT region,\n       ... AS jan,\n       ... AS feb,\n       ... AS mar,\n       ... AS total\nFROM revenue\nGROUP BY region\nORDER BY region;\n",
+    "orderMatters": true,
+    "hints": [
+      "Pivot each month with `SUM(CASE WHEN month='Jan' THEN amount END)`.",
+      "For `total`, sum the whole-month expression `SUM(CASE WHEN month IN ('Jan','Feb','Mar') THEN amount END)` — or just `SUM(amount)` since every row is one of the three months."
+    ],
+    "approaches": [
+      {
+        "name": "pivot then derived total",
+        "sql": "SELECT region,\n       SUM(CASE WHEN month = 'Jan' THEN amount END) AS jan,\n       SUM(CASE WHEN month = 'Feb' THEN amount END) AS feb,\n       SUM(CASE WHEN month = 'Mar' THEN amount END) AS mar,\n       SUM(amount) AS total\nFROM revenue\nGROUP BY region\nORDER BY region;",
+        "explanation": "1. `GROUP BY region` collapses a region's three monthly rows into one group.\n2. Each `SUM(CASE WHEN month='Jan' THEN amount END)` keeps only that month's amount and sums it — the standard pivot that turns the `month` column into `jan`, `feb`, `mar` columns.\n3. The derived `total` is just `SUM(amount)` over the group, which equals `jan + feb + mar` because every row falls into exactly one of the three months.\n4. `ORDER BY region` gives a stable total order."
+      },
+      {
+        "name": "add the pivoted expressions",
+        "sql": "SELECT region,\n       SUM(CASE WHEN month = 'Jan' THEN amount END) AS jan,\n       SUM(CASE WHEN month = 'Feb' THEN amount END) AS feb,\n       SUM(CASE WHEN month = 'Mar' THEN amount END) AS mar,\n       SUM(CASE WHEN month = 'Jan' THEN amount END)\n         + SUM(CASE WHEN month = 'Feb' THEN amount END)\n         + SUM(CASE WHEN month = 'Mar' THEN amount END) AS total\nFROM revenue\nGROUP BY region\nORDER BY region;",
+        "explanation": "1. The three pivoted columns are computed exactly as before.\n2. `total` re-uses the same three conditional sums and adds them, making the derivation explicit (`jan + feb + mar`).\n3. Since every region has all three months populated, none of the sums is NULL, so the addition is safe and equals `SUM(amount)`.\n4. `ORDER BY region` gives a stable total order."
+      }
+    ]
+  },
+  {
+    "slug": "two-dimension-pivot",
+    "title": "Two-Dimensional Pivot: Store by Quarter",
+    "difficulty": "Hard",
+    "category": "Pivoting",
+    "concepts": ["conditional aggregation", "two-dimensional pivot", "SUM", "CASE"],
+    "description": "A two-dimensional pivot groups by one dimension on the rows and spreads a second dimension across the columns. Here each row is a store and each column is a quarter, with summed units in the cells.\n\n**Task:** the `sales2d` table has one row per store per quarter per product (multiple products per store-quarter). Pivot to one row per store with the **total units** sold in each quarter as columns `q1`..`q4`. Return `store`, `q1`, `q2`, `q3`, `q4`. Use `SUM(CASE WHEN quarter='Qx' THEN units END)` so multiple product rows in the same store-quarter are added together. Order by `store`.\n\nOutput columns, in order: `store`, `q1`, `q2`, `q3`, `q4`.",
+    "setupSql": "CREATE TABLE sales2d (store TEXT, quarter TEXT, product TEXT, units INTEGER);\nINSERT INTO sales2d (store, quarter, product, units) VALUES\n  ('A', 'Q1', 'pen', 10), ('A', 'Q1', 'ink', 5), ('A', 'Q2', 'pen', 8),\n  ('A', 'Q3', 'pen', 12), ('A', 'Q4', 'ink', 7),\n  ('B', 'Q1', 'pen', 4),  ('B', 'Q2', 'pen', 6), ('B', 'Q2', 'ink', 3),\n  ('B', 'Q4', 'pen', 9);",
+    "starterSql": "-- group by store; SUM the units within each quarter to merge products\nSELECT store,\n       ... AS q1,\n       ... AS q2,\n       ... AS q3,\n       ... AS q4\nFROM sales2d\nGROUP BY store\nORDER BY store;\n",
+    "orderMatters": true,
+    "hints": [
+      "Group by store only; the quarter becomes the column dimension.",
+      "`SUM(CASE WHEN quarter='Q1' THEN units END)` adds every product's units in Q1.",
+      "Store B has no Q3 row, so its q3 sums to NULL."
+    ],
+    "approaches": [
+      {
+        "name": "SUM(CASE ...) 2-D pivot",
+        "sql": "SELECT store,\n       SUM(CASE WHEN quarter = 'Q1' THEN units END) AS q1,\n       SUM(CASE WHEN quarter = 'Q2' THEN units END) AS q2,\n       SUM(CASE WHEN quarter = 'Q3' THEN units END) AS q3,\n       SUM(CASE WHEN quarter = 'Q4' THEN units END) AS q4\nFROM sales2d\nGROUP BY store\nORDER BY store;",
+        "explanation": "1. `GROUP BY store` puts the row dimension (store) on the rows — one output row per store.\n2. `SUM(CASE WHEN quarter='Q1' THEN units END)` spreads the second dimension (quarter) across columns: it keeps only Q1 rows and, crucially, `SUM` adds the multiple product rows in the same store-quarter (e.g. store A's Q1 pen 10 + ink 5 = 15).\n3. Repeating for Q2/Q3/Q4 fills the remaining columns — this is the two-dimensional pivot (store x quarter, value = total units).\n4. Store B has no Q3 row, so its `q3` is `NULL`.\n5. `ORDER BY store` gives a stable total order."
+      }
+    ]
+  }
+]

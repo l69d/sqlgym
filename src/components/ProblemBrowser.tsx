@@ -50,10 +50,11 @@ export function ProblemBrowser({ items }: { items: ProblemSummary[] }) {
           Master the SQL that interviews actually test
         </h1>
         <p className="mt-2 max-w-2xl text-[var(--muted)]">
-          A LeetCode-style gym for the advanced, neglected corners of SQL —
-          recursive CTEs, window functions, ranking, gaps &amp; islands,
-          relational division and tricky ordering. Every query runs live in your
-          browser against a real SQLite engine.
+          A LeetCode-style gym of {items.length}+ problems spanning every corner
+          of SQL — joins, aggregation, subqueries, set ops, CTEs &amp; recursion,
+          window functions, ranking, pivoting, dates, strings and NULL logic.
+          Every query runs live in your browser on a real SQLite engine, and each
+          ships a worked solution with a step-by-step explanation.
         </p>
         <div className="mt-3 flex flex-wrap gap-2 text-xs">
           {CATEGORIES.map((c) => (

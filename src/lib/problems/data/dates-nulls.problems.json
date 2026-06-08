@@ -1,0 +1,328 @@
+[
+  {
+    "slug": "days-between-two-dates",
+    "title": "Days Between Subscription Dates",
+    "difficulty": "Easy",
+    "category": "Dates & Time",
+    "concepts": ["julianday"],
+    "description": "SQLite stores dates as TEXT, so to get a *number of days* between two dates you convert both to Julian day numbers with `julianday(x)` and subtract.\n\n**Task:** for each subscription return `id`, `signup`, `cancelled`, and `days_active` — the whole number of days between `signup` and `cancelled` (`cancelled - signup`). Both columns are plain `'YYYY-MM-DD'` dates, so the difference is already an integer; cast it to an integer with `CAST(... AS INTEGER)`. Order by `id`.\n\nOutput columns, in order: `id`, `signup`, `cancelled`, `days_active`.",
+    "setupSql": "CREATE TABLE subscriptions (id INTEGER, signup TEXT, cancelled TEXT);\nINSERT INTO subscriptions (id, signup, cancelled) VALUES\n  (1, '2024-01-01', '2024-01-31'),\n  (2, '2024-02-10', '2024-03-01'),\n  (3, '2024-03-15', '2024-03-20'),\n  (4, '2024-04-01', '2024-06-15');",
+    "starterSql": "-- subtract julianday(signup) from julianday(cancelled)\nSELECT id, signup, cancelled,\n       ... AS days_active\nFROM subscriptions\nORDER BY id;\n",
+    "orderMatters": true,
+    "hints": [
+      "julianday('2024-01-31') - julianday('2024-01-01') is 30.0 — a float.",
+      "Wrap the subtraction in CAST(... AS INTEGER) so days_active comes back as a whole number."
+    ],
+    "approaches": [
+      {
+        "name": "julianday difference",
+        "sql": "SELECT id, signup, cancelled,\n       CAST(julianday(cancelled) - julianday(signup) AS INTEGER) AS days_active\nFROM subscriptions\nORDER BY id;",
+        "explanation": "1. `julianday(x)` converts a date string to a continuous day count (the Julian day number). The fractional part is the time of day; for a midnight `'YYYY-MM-DD'` value it is `.5`, but since both dates share the same `.5` offset the offsets cancel.\n2. `julianday(cancelled) - julianday(signup)` is therefore the exact number of days between the two dates, returned as a float like `30.0`.\n3. `CAST(... AS INTEGER)` drops the (zero) fractional part and gives a clean integer `days_active`.\n4. `ORDER BY id` gives a stable, total order."
+      }
+    ]
+  },
+  {
+    "slug": "extract-year-month-weekday",
+    "title": "Extract Year, Month, and Weekday",
+    "difficulty": "Easy",
+    "category": "Dates & Time",
+    "concepts": ["strftime"],
+    "description": "`strftime(format, date)` pulls calendar components out of a date string. `'%Y'` is the 4-digit year, `'%m'` the 2-digit month, and `'%w'` the weekday number where **0 = Sunday … 6 = Saturday**.\n\n**Task:** for each event return `id`, `event_date`, `yr`, `mo`, and `wday` where `yr`/`mo`/`wday` are the strftime values above (keep them as the strings strftime returns). Order by `id`.\n\nOutput columns, in order: `id`, `event_date`, `yr`, `mo`, `wday`.",
+    "setupSql": "CREATE TABLE events (id INTEGER, event_date TEXT);\nINSERT INTO events (id, event_date) VALUES\n  (1, '2024-01-07'),\n  (2, '2024-02-29'),\n  (3, '2024-06-15'),\n  (4, '2023-12-25'),\n  (5, '2024-07-04');",
+    "starterSql": "-- '%Y' year, '%m' month, '%w' weekday (0=Sun..6=Sat)\nSELECT id, event_date,\n       ... AS yr,\n       ... AS mo,\n       ... AS wday\nFROM events\nORDER BY id;\n",
+    "orderMatters": true,
+    "hints": [
+      "strftime('%Y', event_date) returns the year as a 4-character string like '2024'.",
+      "strftime('%w', event_date) returns '0' for Sunday through '6' for Saturday."
+    ],
+    "approaches": [
+      {
+        "name": "strftime components",
+        "sql": "SELECT id, event_date,\n       strftime('%Y', event_date) AS yr,\n       strftime('%m', event_date) AS mo,\n       strftime('%w', event_date) AS wday\nFROM events\nORDER BY id;",
+        "explanation": "1. `strftime('%Y', event_date)` formats only the year, returning a string such as `'2024'`.\n2. `strftime('%m', event_date)` returns the zero-padded month, e.g. `'02'` for February.\n3. `strftime('%w', event_date)` returns the weekday index as a single character, `'0'` (Sunday) through `'6'` (Saturday). `'2024-06-15'` is a Saturday so it yields `'6'`.\n4. All three are returned exactly as strftime produces them, and `ORDER BY id` keeps the rows in a deterministic order."
+      }
+    ]
+  },
+  {
+    "slug": "weekend-events",
+    "title": "Weekend Events Only",
+    "difficulty": "Easy",
+    "category": "Dates & Time",
+    "concepts": ["strftime", "weekday filter"],
+    "description": "A row falls on a weekend when its weekday number is **Saturday (6)** or **Sunday (0)** — exactly the two values `strftime('%w', date)` returns for the weekend.\n\n**Task:** return `id`, `event_date`, and `wday` (the `'%w'` value) for only the events that fall on a Saturday or Sunday. Order by `event_date`.\n\nOutput columns, in order: `id`, `event_date`, `wday`.",
+    "setupSql": "CREATE TABLE events (id INTEGER, event_date TEXT);\nINSERT INTO events (id, event_date) VALUES\n  (1, '2024-06-10'),\n  (2, '2024-06-15'),\n  (3, '2024-06-16'),\n  (4, '2024-06-18'),\n  (5, '2024-06-22'),\n  (6, '2024-06-23'),\n  (7, '2024-06-24');",
+    "starterSql": "-- keep rows where the weekday is Saturday (6) or Sunday (0)\nSELECT id, event_date,\n       strftime('%w', event_date) AS wday\nFROM events\nWHERE ...\nORDER BY event_date;\n",
+    "orderMatters": true,
+    "hints": [
+      "strftime('%w', event_date) is '0' for Sunday and '6' for Saturday.",
+      "Use WHERE strftime('%w', event_date) IN ('0', '6') — compare against the string values."
+    ],
+    "approaches": [
+      {
+        "name": "IN ('0','6') filter",
+        "sql": "SELECT id, event_date,\n       strftime('%w', event_date) AS wday\nFROM events\nWHERE strftime('%w', event_date) IN ('0', '6')\nORDER BY event_date;",
+        "explanation": "1. `strftime('%w', event_date)` returns the weekday as a string `'0'`..`'6'` with `0`=Sunday and `6`=Saturday.\n2. The `WHERE ... IN ('0', '6')` clause keeps only the rows whose weekday is Sunday or Saturday. Note the values are **strings**, matching what strftime returns.\n3. `2024-06-15` (Sat), `2024-06-16` (Sun), `2024-06-22` (Sat), `2024-06-23` (Sun) survive the filter; the weekdays are dropped.\n4. `ORDER BY event_date` gives a deterministic, total order over the distinct dates."
+      },
+      {
+        "name": "explicit OR",
+        "sql": "SELECT id, event_date,\n       strftime('%w', event_date) AS wday\nFROM events\nWHERE strftime('%w', event_date) = '0'\n   OR strftime('%w', event_date) = '6'\nORDER BY event_date;",
+        "explanation": "Same logic written as two equality checks joined by `OR`: keep the row when the weekday is `'0'` (Sunday) or `'6'` (Saturday). This is exactly equivalent to `IN ('0','6')`."
+      }
+    ]
+  },
+  {
+    "slug": "events-per-month",
+    "title": "Count Events Per Month",
+    "difficulty": "Medium",
+    "category": "Dates & Time",
+    "concepts": ["strftime", "GROUP BY month"],
+    "description": "To aggregate by calendar month you `GROUP BY` a month key built with `strftime('%Y-%m', date)`, which collapses every date in the same month to one bucket like `'2024-03'`.\n\n**Task:** return `ym` (the `'%Y-%m'` month key) and `cnt` (the number of events in that month). Include only months that actually have events. Order by `ym`.\n\nOutput columns, in order: `ym`, `cnt`.",
+    "setupSql": "CREATE TABLE events (id INTEGER, event_date TEXT);\nINSERT INTO events (id, event_date) VALUES\n  (1, '2024-01-05'),\n  (2, '2024-01-20'),\n  (3, '2024-01-31'),\n  (4, '2024-03-02'),\n  (5, '2024-03-15'),\n  (6, '2024-04-01'),\n  (7, '2024-04-10'),\n  (8, '2024-04-25'),\n  (9, '2024-04-30');",
+    "starterSql": "-- bucket by strftime('%Y-%m', event_date), then count\nSELECT strftime('%Y-%m', event_date) AS ym,\n       COUNT(*) AS cnt\nFROM events\nGROUP BY ...\nORDER BY ym;\n",
+    "orderMatters": true,
+    "hints": [
+      "strftime('%Y-%m', event_date) yields one value per month, e.g. '2024-04'.",
+      "GROUP BY the same expression you SELECT, then COUNT(*) the rows in each group."
+    ],
+    "approaches": [
+      {
+        "name": "GROUP BY month key",
+        "sql": "SELECT strftime('%Y-%m', event_date) AS ym,\n       COUNT(*) AS cnt\nFROM events\nGROUP BY strftime('%Y-%m', event_date)\nORDER BY ym;",
+        "explanation": "1. `strftime('%Y-%m', event_date)` turns each date into a month label such as `'2024-01'`; all dates within one month share that label.\n2. `GROUP BY` on that expression collapses the rows month by month.\n3. `COUNT(*)` counts rows inside each month bucket: January has 3, March 2, April 4.\n4. Months with no events (e.g. February) never appear because there are no rows to group. `ORDER BY ym` sorts the buckets chronologically since the `'YYYY-MM'` text sorts the same as the calendar."
+      },
+      {
+        "name": "GROUP BY alias position",
+        "sql": "SELECT strftime('%Y-%m', event_date) AS ym,\n       COUNT(*) AS cnt\nFROM events\nGROUP BY 1\nORDER BY 1;",
+        "explanation": "Identical result using `GROUP BY 1` / `ORDER BY 1`, where `1` refers to the first item in the SELECT list (the `ym` month key). SQLite resolves the ordinal to the same `strftime` expression."
+      }
+    ]
+  },
+  {
+    "slug": "age-in-whole-years",
+    "title": "Age in Whole Years",
+    "difficulty": "Medium",
+    "category": "Dates & Time",
+    "concepts": ["strftime", "whole-year age"],
+    "description": "Computing age as `(today - birthday) / 365.25` is fractional and error-prone. The clean integer trick is to compare the two dates formatted as `'%Y%m%d'`: subtract the year, then subtract 1 more if the birthday's month-and-day hasn't been reached yet this year.\n\nUse a **fixed reference date of `'2024-06-15'`** (not today) so results are stable.\n\n**Task:** for each person return `name`, `birthday`, and `age` — their whole-year age as of `'2024-06-15'`. The result must be an integer. Order by `name`.\n\nOutput columns, in order: `name`, `birthday`, `age`.",
+    "setupSql": "CREATE TABLE people (name TEXT, birthday TEXT);\nINSERT INTO people (name, birthday) VALUES\n  ('Ada',   '2000-06-15'),\n  ('Bo',    '2000-06-16'),\n  ('Cleo',  '1990-01-01'),\n  ('Dee',   '2010-12-31'),\n  ('Evan',  '2004-06-14');",
+    "starterSql": "-- age = year diff, minus 1 if the birthday hasn't occurred yet this year.\n-- Compare strftime('%Y%m%d', ...) of the reference date vs the birthday.\nSELECT name, birthday,\n       ... AS age\nFROM people\nORDER BY name;\n",
+    "orderMatters": true,
+    "hints": [
+      "strftime('%Y%m%d', '2024-06-15') gives the comparable integer-ish string '20240615'.",
+      "(refYYYYMMDD - bdayYYYYMMDD) / 10000 with integer division gives the completed-year age. Use CAST(strftime(...) AS INTEGER)."
+    ],
+    "approaches": [
+      {
+        "name": "YYYYMMDD integer division",
+        "sql": "SELECT name, birthday,\n       (CAST(strftime('%Y%m%d', '2024-06-15') AS INTEGER)\n        - CAST(strftime('%Y%m%d', birthday) AS INTEGER)) / 10000 AS age\nFROM people\nORDER BY name;",
+        "explanation": "1. `strftime('%Y%m%d', x)` renders a date as the 8-character string `'YYYYMMDD'`; `CAST(... AS INTEGER)` turns it into a comparable number like `20240615`.\n2. Subtracting the birthday's number from the reference's number gives a value whose leading digits are the year difference and whose lower 4 digits encode whether the month/day has passed.\n3. Integer-dividing by `10000` keeps only the year portion — and crucially drops a year automatically when the birthday is later in the year than the reference (the lower 4 digits go negative, pulling the quotient down). `Bo` (born `2000-06-16`) is still 23 on `2024-06-15`, while `Ada` (`2000-06-15`) has just turned 24.\n4. Integer division means `age` is always a whole number, no rounding needed. `ORDER BY name` gives a stable order."
+      }
+    ]
+  },
+  {
+    "slug": "last-n-days-window",
+    "title": "Orders in the Last 30 Days",
+    "difficulty": "Medium",
+    "category": "Dates & Time",
+    "concepts": ["date arithmetic", "reference date"],
+    "description": "To find rows within the last *N* days of a reference point, compare the date against `date(reference, '-N days')`. Anything `>=` that boundary (and `<=` the reference) is inside the window.\n\nUse a **fixed reference date of `'2024-06-15'`** so the answer is stable, and a 30-day window.\n\n**Task:** return `id`, `order_date`, and `days_ago` (whole days between `order_date` and `'2024-06-15'`) for orders placed in the **last 30 days up to and including `'2024-06-15'`** — that is, with `order_date` between `'2024-05-16'` and `'2024-06-15'` inclusive. Order by `order_date`.\n\nOutput columns, in order: `id`, `order_date`, `days_ago`.",
+    "setupSql": "CREATE TABLE orders (id INTEGER, order_date TEXT);\nINSERT INTO orders (id, order_date) VALUES\n  (1, '2024-04-01'),\n  (2, '2024-05-15'),\n  (3, '2024-05-16'),\n  (4, '2024-05-30'),\n  (5, '2024-06-14'),\n  (6, '2024-06-15'),\n  (7, '2024-06-20');",
+    "starterSql": "-- keep order_date in [date('2024-06-15','-30 days'), '2024-06-15']\nSELECT id, order_date,\n       CAST(julianday('2024-06-15') - julianday(order_date) AS INTEGER) AS days_ago\nFROM orders\nWHERE ...\nORDER BY order_date;\n",
+    "orderMatters": true,
+    "hints": [
+      "date('2024-06-15', '-30 days') is '2024-05-16' — the start of the 30-day window.",
+      "Filter order_date BETWEEN that start and '2024-06-15'; rows on or after the future reference (e.g. 2024-06-20) are excluded."
+    ],
+    "approaches": [
+      {
+        "name": "date('-30 days') boundary",
+        "sql": "SELECT id, order_date,\n       CAST(julianday('2024-06-15') - julianday(order_date) AS INTEGER) AS days_ago\nFROM orders\nWHERE order_date >= date('2024-06-15', '-30 days')\n  AND order_date <= '2024-06-15'\nORDER BY order_date;",
+        "explanation": "1. `date('2024-06-15', '-30 days')` computes the lower boundary `'2024-05-16'`.\n2. The `WHERE` keeps rows whose `order_date` is on or after that boundary and on or before the reference date `'2024-06-15'`. The April order is too old; the `2024-06-20` order is in the future relative to the reference and is excluded.\n3. For the surviving rows, `julianday('2024-06-15') - julianday(order_date)` is the number of days ago, cast to an integer for a clean `days_ago`.\n4. `ORDER BY order_date` returns the matches oldest-first in a total order."
+      },
+      {
+        "name": "BETWEEN form",
+        "sql": "SELECT id, order_date,\n       CAST(julianday('2024-06-15') - julianday(order_date) AS INTEGER) AS days_ago\nFROM orders\nWHERE order_date BETWEEN date('2024-06-15', '-30 days') AND '2024-06-15'\nORDER BY order_date;",
+        "explanation": "`BETWEEN a AND b` is inclusive on both ends, so this is the same window as the two `>=`/`<=` comparisons: from `'2024-05-16'` through `'2024-06-15'`. Text dates in `'YYYY-MM-DD'` compare correctly lexicographically, so the range works directly on the strings."
+      }
+    ]
+  },
+  {
+    "slug": "first-last-day-of-month",
+    "title": "First and Last Day of Each Month",
+    "difficulty": "Medium",
+    "category": "Dates & Time",
+    "concepts": ["date modifiers", "start of month"],
+    "description": "SQLite's date modifiers make month boundaries easy: `date(x, 'start of month')` jumps to the 1st, and `date(x, 'start of month', '+1 month', '-1 day')` lands on the last day of that month (handling 28/29/30/31 automatically).\n\n**Task:** for each row return `id`, `any_date`, `month_start`, and `month_end` — the first and last calendar day of the month that `any_date` falls in. Order by `any_date`.\n\nOutput columns, in order: `id`, `any_date`, `month_start`, `month_end`.",
+    "setupSql": "CREATE TABLE samples (id INTEGER, any_date TEXT);\nINSERT INTO samples (id, any_date) VALUES\n  (1, '2024-02-14'),\n  (2, '2024-04-30'),\n  (3, '2023-02-10'),\n  (4, '2024-12-01'),\n  (5, '2024-06-15');",
+    "starterSql": "-- 'start of month' for the first day; add a month and subtract a day for the last.\nSELECT id, any_date,\n       date(any_date, 'start of month') AS month_start,\n       ... AS month_end\nFROM samples\nORDER BY any_date;\n",
+    "orderMatters": true,
+    "hints": [
+      "date(any_date, 'start of month') gives the 1st of the month.",
+      "date(any_date, 'start of month', '+1 month', '-1 day') gives the last day — Feb 2024 correctly yields the 29th (leap year)."
+    ],
+    "approaches": [
+      {
+        "name": "start of month modifiers",
+        "sql": "SELECT id, any_date,\n       date(any_date, 'start of month') AS month_start,\n       date(any_date, 'start of month', '+1 month', '-1 day') AS month_end\nFROM samples\nORDER BY any_date;",
+        "explanation": "1. `date(any_date, 'start of month')` snaps any date back to the 1st of its month, giving `month_start`.\n2. For `month_end`, start at the 1st, add `'+1 month'` to reach the 1st of the *next* month, then subtract `'-1 day'` to step back to the final day of the original month.\n3. The modifiers respect month length and leap years: `'2024-02-14'` → end `'2024-02-29'` (leap), while `'2023-02-10'` → end `'2023-02-28'`.\n4. `ORDER BY any_date` keeps the rows in a deterministic total order."
+      }
+    ]
+  },
+  {
+    "slug": "events-per-weekday",
+    "title": "Events Per Weekday Name",
+    "difficulty": "Hard",
+    "category": "Dates & Time",
+    "concepts": ["strftime", "weekday mapping", "GROUP BY"],
+    "description": "`strftime('%w', date)` gives the weekday as a number `0`..`6` (0=Sunday). To report human-readable names you map that number to a label with a `CASE` expression, then `GROUP BY` it to count events per weekday.\n\n**Task:** return `weekday` (the day name: `Sunday`, `Monday`, …, `Saturday`) and `cnt` (number of events on that weekday). Include only weekdays that have at least one event. Order by the weekday number (`'%w'`) so the week runs Sunday → Saturday.\n\nOutput columns, in order: `weekday`, `cnt`.",
+    "setupSql": "CREATE TABLE events (id INTEGER, event_date TEXT);\nINSERT INTO events (id, event_date) VALUES\n  (1, '2024-06-09'),\n  (2, '2024-06-10'),\n  (3, '2024-06-11'),\n  (4, '2024-06-16'),\n  (5, '2024-06-17'),\n  (6, '2024-06-15'),\n  (7, '2024-06-22'),\n  (8, '2024-06-24'),\n  (9, '2024-06-23');",
+    "starterSql": "-- map strftime('%w', event_date) -> day name with CASE, then GROUP BY it.\nSELECT CASE strftime('%w', event_date)\n         WHEN '0' THEN 'Sunday'\n         -- ...\n       END AS weekday,\n       COUNT(*) AS cnt\nFROM events\nGROUP BY strftime('%w', event_date)\nORDER BY strftime('%w', event_date);\n",
+    "orderMatters": true,
+    "hints": [
+      "Build the name with CASE strftime('%w', event_date) WHEN '0' THEN 'Sunday' ... END.",
+      "GROUP BY and ORDER BY the numeric '%w' value, not the name, so the week is ordered Sunday(0) → Saturday(6)."
+    ],
+    "approaches": [
+      {
+        "name": "CASE map + GROUP BY weekday number",
+        "sql": "SELECT CASE strftime('%w', event_date)\n         WHEN '0' THEN 'Sunday'\n         WHEN '1' THEN 'Monday'\n         WHEN '2' THEN 'Tuesday'\n         WHEN '3' THEN 'Wednesday'\n         WHEN '4' THEN 'Thursday'\n         WHEN '5' THEN 'Friday'\n         WHEN '6' THEN 'Saturday'\n       END AS weekday,\n       COUNT(*) AS cnt\nFROM events\nGROUP BY strftime('%w', event_date)\nORDER BY strftime('%w', event_date);",
+        "explanation": "1. `strftime('%w', event_date)` produces the weekday index `'0'`..`'6'`.\n2. The `CASE` translates each index to a day name for display.\n3. `GROUP BY strftime('%w', event_date)` buckets all events that share a weekday; `COUNT(*)` counts them. Sundays (`2024-06-09`, `2024-06-16`, `2024-06-23`) total 3.\n4. `ORDER BY strftime('%w', event_date)` orders the buckets by the *number*, so the result runs Sunday→Saturday rather than alphabetically. Grouping on the number (not the CASE alias) keeps the mapping unambiguous and only present weekdays appear."
+      },
+      {
+        "name": "GROUP BY name and number together",
+        "sql": "SELECT CASE strftime('%w', event_date)\n         WHEN '0' THEN 'Sunday'\n         WHEN '1' THEN 'Monday'\n         WHEN '2' THEN 'Tuesday'\n         WHEN '3' THEN 'Wednesday'\n         WHEN '4' THEN 'Thursday'\n         WHEN '5' THEN 'Friday'\n         WHEN '6' THEN 'Saturday'\n       END AS weekday,\n       COUNT(*) AS cnt\nFROM events\nGROUP BY strftime('%w', event_date), weekday\nORDER BY strftime('%w', event_date);",
+        "explanation": "Same buckets, but grouping explicitly on both the numeric weekday and the derived `weekday` name. Because the name is fully determined by the number, adding it to the GROUP BY does not split any group, so the counts and order are identical to the first approach."
+      }
+    ]
+  },
+  {
+    "slug": "coalesce-default-values",
+    "title": "Default Missing Values with COALESCE",
+    "difficulty": "Easy",
+    "category": "NULL Handling",
+    "concepts": ["COALESCE", "IFNULL"],
+    "description": "`COALESCE(a, b, ...)` returns the first non-NULL argument, which makes it perfect for supplying defaults when a column is missing.\n\n**Task:** for each user return `id`, `name`, and `nickname` — but when `nickname` is `NULL`, fall back to the user's `name`; if (hypothetically) both were NULL, fall back to the literal `'anonymous'`. Order by `id`.\n\nOutput columns, in order: `id`, `name`, `nickname`.",
+    "setupSql": "CREATE TABLE users (id INTEGER, name TEXT, nickname TEXT);\nINSERT INTO users (id, name, nickname) VALUES\n  (1, 'Alice', 'Ali'),\n  (2, 'Bob',   NULL),\n  (3, 'Carol', 'CC'),\n  (4, 'Dan',   NULL);",
+    "starterSql": "-- COALESCE returns the first non-NULL argument\nSELECT id, name,\n       ... AS nickname\nFROM users\nORDER BY id;\n",
+    "orderMatters": true,
+    "hints": [
+      "COALESCE(nickname, name, 'anonymous') tries nickname first, then name, then the literal.",
+      "For Bob and Dan the nickname is NULL, so COALESCE skips to name."
+    ],
+    "approaches": [
+      {
+        "name": "COALESCE chain",
+        "sql": "SELECT id, name,\n       COALESCE(nickname, name, 'anonymous') AS nickname\nFROM users\nORDER BY id;",
+        "explanation": "1. `COALESCE(nickname, name, 'anonymous')` evaluates its arguments left to right and returns the first that is not NULL.\n2. For Alice and Carol, `nickname` is already non-NULL, so it is returned unchanged.\n3. For Bob and Dan, `nickname` is NULL, so COALESCE moves on and returns `name` (`'Bob'`, `'Dan'`).\n4. The final `'anonymous'` literal is a safety net that would only appear if both prior values were NULL. `ORDER BY id` keeps a stable order."
+      },
+      {
+        "name": "nested IFNULL",
+        "sql": "SELECT id, name,\n       IFNULL(IFNULL(nickname, name), 'anonymous') AS nickname\nFROM users\nORDER BY id;",
+        "explanation": "`IFNULL(x, y)` is the two-argument form of COALESCE. Nesting `IFNULL(IFNULL(nickname, name), 'anonymous')` reproduces the same fallback chain: prefer nickname, else name, else the literal — giving an identical result."
+      }
+    ]
+  },
+  {
+    "slug": "nullif-avoid-divide-by-zero",
+    "title": "Avoid Divide-by-Zero with NULLIF",
+    "difficulty": "Easy",
+    "category": "NULL Handling",
+    "concepts": ["NULLIF", "COALESCE"],
+    "description": "Dividing by zero would normally be a problem, but in SQLite division by NULL yields NULL (no error). The idiom `x / NULLIF(divisor, 0)` converts a zero divisor into NULL so the whole expression becomes NULL instead of blowing up — then you can wrap it in COALESCE to show a default.\n\n**Task:** for each campaign return `id`, `clicks`, `impressions`, and `ctr` — the click-through rate `clicks / impressions` as a ratio rounded to 3 decimals. When `impressions` is `0`, `ctr` must be `0.0` (not an error and not NULL). Order by `id`.\n\nOutput columns, in order: `id`, `clicks`, `impressions`, `ctr`.",
+    "setupSql": "CREATE TABLE campaigns (id INTEGER, clicks INTEGER, impressions INTEGER);\nINSERT INTO campaigns (id, clicks, impressions) VALUES\n  (1, 5, 100),\n  (2, 0, 0),\n  (3, 20, 80),\n  (4, 3, 0),\n  (5, 9, 50);",
+    "starterSql": "-- NULLIF(impressions, 0) makes a zero divisor NULL; COALESCE supplies 0.0\nSELECT id, clicks, impressions,\n       ... AS ctr\nFROM campaigns\nORDER BY id;\n",
+    "orderMatters": true,
+    "hints": [
+      "Use 1.0 * clicks / NULLIF(impressions, 0) to force float division and dodge a zero divisor.",
+      "Wrap the whole thing in COALESCE(ROUND(..., 3), 0.0) so a zero-impression campaign shows 0.0."
+    ],
+    "approaches": [
+      {
+        "name": "NULLIF + COALESCE",
+        "sql": "SELECT id, clicks, impressions,\n       COALESCE(ROUND(1.0 * clicks / NULLIF(impressions, 0), 3), 0.0) AS ctr\nFROM campaigns\nORDER BY id;",
+        "explanation": "1. `NULLIF(impressions, 0)` returns NULL when impressions is 0, otherwise the value itself.\n2. `1.0 * clicks / NULLIF(...)` forces floating-point division; when the divisor is NULL the whole division is NULL (SQLite does not raise a divide-by-zero error here).\n3. `ROUND(..., 3)` rounds the ratio to 3 decimals (e.g. campaign 3 → `0.25`).\n4. `COALESCE(..., 0.0)` replaces the NULL produced for zero-impression campaigns (ids 2 and 4) with `0.0`, matching the spec. `ORDER BY id` gives a stable order. Rounding to 3 decimals is stated so the values are deterministic."
+      }
+    ]
+  },
+  {
+    "slug": "count-star-vs-count-col",
+    "title": "COUNT(*) vs COUNT(column) and AVG over NULLs",
+    "difficulty": "Medium",
+    "category": "NULL Handling",
+    "concepts": ["COUNT(*)", "COUNT(col)", "AVG ignores NULL"],
+    "description": "Aggregates treat NULL differently depending on form. `COUNT(*)` counts **rows**; `COUNT(col)` counts only rows where `col` **is not NULL**; and `AVG(col)` averages only the non-NULL values (it divides by the non-NULL count, not the row count).\n\n**Task:** over the whole `reviews` table return a single row with `total_rows` (= `COUNT(*)`), `rated_rows` (= `COUNT(score)`), and `avg_score` (= `AVG(score)` rounded to 2 decimals). This single-row aggregate demonstrates how the three differ when `score` contains NULLs.\n\nOutput columns, in order: `total_rows`, `rated_rows`, `avg_score`.",
+    "setupSql": "CREATE TABLE reviews (id INTEGER, score INTEGER);\nINSERT INTO reviews (id, score) VALUES\n  (1, 5),\n  (2, NULL),\n  (3, 3),\n  (4, 4),\n  (5, NULL),\n  (6, 2);",
+    "starterSql": "-- COUNT(*) counts rows; COUNT(score) skips NULLs; AVG(score) divides by non-NULL count.\nSELECT COUNT(*) AS total_rows,\n       ... AS rated_rows,\n       ROUND(..., 2) AS avg_score\nFROM reviews;\n",
+    "orderMatters": false,
+    "hints": [
+      "COUNT(*) is 6; COUNT(score) is 4 because two scores are NULL.",
+      "AVG(score) = (5+3+4+2)/4 = 3.5 — it divides by 4 (non-NULL count), not 6."
+    ],
+    "approaches": [
+      {
+        "name": "three aggregate forms",
+        "sql": "SELECT COUNT(*) AS total_rows,\n       COUNT(score) AS rated_rows,\n       ROUND(AVG(score), 2) AS avg_score\nFROM reviews;",
+        "explanation": "1. `COUNT(*)` counts every row regardless of NULLs → 6.\n2. `COUNT(score)` counts only rows where `score` is not NULL → 4 (ids 2 and 5 are skipped).\n3. `AVG(score)` sums the non-NULL scores (5+3+4+2 = 14) and divides by the **non-NULL count** (4), giving 3.5; `ROUND(..., 2)` formats it as `3.5`.\n4. The query is a single full-table aggregate, so it returns exactly one row. `orderMatters` is false but the one-row multiset is uniquely determined."
+      },
+      {
+        "name": "AVG as SUM/COUNT(col)",
+        "sql": "SELECT COUNT(*) AS total_rows,\n       COUNT(score) AS rated_rows,\n       ROUND(1.0 * SUM(score) / COUNT(score), 2) AS avg_score\nFROM reviews;",
+        "explanation": "Shows what `AVG(score)` does under the hood: `SUM(score)` (which also ignores NULL) divided by `COUNT(score)` (the non-NULL count). `1.0 *` forces float division and `ROUND(..., 2)` matches. The result equals 3.5, identical to using `AVG` directly."
+      }
+    ]
+  },
+  {
+    "slug": "not-in-null-trap",
+    "title": "The NOT IN NULL Trap",
+    "difficulty": "Hard",
+    "category": "NULL Handling",
+    "concepts": ["NOT EXISTS", "NOT IN pitfall", "three-valued logic"],
+    "description": "You want every customer who has **never** placed an order. The obvious `NOT IN (SELECT customer_id FROM orders)` looks right — but `orders.customer_id` contains a `NULL`. With a NULL in the list, `x NOT IN (..., NULL)` can never evaluate to TRUE (it is NULL/unknown for every `x`), so the query silently returns **zero rows**. The robust fix is a correlated `NOT EXISTS`, which uses row-level matching and is immune to the NULL.\n\n**Task:** return `id` and `name` of every customer with no matching order, using a NULL-safe approach. Order by `id`.\n\nOutput columns, in order: `id`, `name`.\n\n*(Note: the inner `orders.customer_id` set deliberately contains a NULL — this is exactly the case where `NOT IN` breaks and `NOT EXISTS` is required.)*",
+    "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers (id, name) VALUES\n  (1, 'Alice'),\n  (2, 'Bob'),\n  (3, 'Carol'),\n  (4, 'Dan'),\n  (5, 'Eve');\nCREATE TABLE orders (order_id INTEGER, customer_id INTEGER);\nINSERT INTO orders (order_id, customer_id) VALUES\n  (101, 1),\n  (102, 3),\n  (103, NULL),\n  (104, 1);",
+    "starterSql": "-- Use NOT EXISTS, not NOT IN: orders.customer_id has a NULL.\nSELECT c.id, c.name\nFROM customers c\nWHERE NOT EXISTS (\n  SELECT 1 FROM orders o WHERE o.customer_id = c.id\n)\nORDER BY c.id;\n",
+    "orderMatters": true,
+    "hints": [
+      "NOT IN (SELECT customer_id FROM orders) returns 0 rows here because the subquery yields a NULL — every comparison becomes UNKNOWN.",
+      "NOT EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id) tests row by row and is unaffected by the NULL."
+    ],
+    "approaches": [
+      {
+        "name": "NOT EXISTS (NULL-safe)",
+        "sql": "SELECT c.id, c.name\nFROM customers c\nWHERE NOT EXISTS (\n  SELECT 1 FROM orders o WHERE o.customer_id = c.id\n)\nORDER BY c.id;",
+        "explanation": "1. The correlated subquery `SELECT 1 FROM orders o WHERE o.customer_id = c.id` looks for *any* order belonging to the current customer.\n2. `NOT EXISTS` is TRUE exactly when the subquery finds no such row. The `o.customer_id = NULL` row never matches any customer's `id` (the equality is unknown), so it simply never contributes a match — it does **not** poison the result.\n3. Customers 1 (Alice) and 3 (Carol) have orders and are excluded; customers 2, 4, 5 have none and are returned.\n4. **Why `NOT IN` fails here:** `c.id NOT IN (1, 3, NULL)` evaluates to UNKNOWN for every customer because comparing against the NULL yields UNKNOWN, and `NOT IN` requires *all* comparisons to be definitively unequal. UNKNOWN is not TRUE, so the WHERE rejects every row and the broken query returns **zero rows**. That is why it is not shown as an approach — it cannot match this oracle. `ORDER BY c.id` gives a deterministic order."
+      },
+      {
+        "name": "LEFT JOIN ... IS NULL",
+        "sql": "SELECT c.id, c.name\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.id\nWHERE o.order_id IS NULL\nORDER BY c.id;",
+        "explanation": "An equivalent NULL-safe technique. The `LEFT JOIN` keeps every customer; unmatched customers get NULLs on the `orders` side. Filtering `WHERE o.order_id IS NULL` keeps only customers that found no matching order. The stray `customer_id = NULL` order joins to nobody, so it harmlessly drops out — yielding the same customers 2, 4, 5 as `NOT EXISTS`."
+      }
+    ]
+  },
+  {
+    "slug": "is-null-three-valued-logic",
+    "title": "IS NULL, IS NOT NULL, and Three-Valued Logic",
+    "difficulty": "Medium",
+    "category": "NULL Handling",
+    "concepts": ["IS NULL", "IS NOT NULL", "three-valued logic"],
+    "description": "In SQL, `col = NULL` is **never** TRUE — comparisons with NULL produce UNKNOWN, which the WHERE clause treats as not-true and filters out. To test for missing values you must use `IS NULL` / `IS NOT NULL`. This is the heart of three-valued logic (TRUE / FALSE / UNKNOWN).\n\n**Task:** the `tasks` table has an `assignee` that may be NULL. Return `id`, `title`, and `status` where `status` is `'unassigned'` when `assignee IS NULL` and `'assigned'` otherwise. Then keep only rows that are actually **assigned** (`assignee IS NOT NULL`). Order by `id`.\n\nOutput columns, in order: `id`, `title`, `status`.",
+    "setupSql": "CREATE TABLE tasks (id INTEGER, title TEXT, assignee TEXT);\nINSERT INTO tasks (id, title, assignee) VALUES\n  (1, 'Write spec',   'Alice'),\n  (2, 'Fix bug',      NULL),\n  (3, 'Review PR',    'Bob'),\n  (4, 'Deploy',       NULL),\n  (5, 'Update docs',  'Carol');",
+    "starterSql": "-- Use IS NOT NULL to filter; col = NULL would match nothing.\nSELECT id, title,\n       CASE WHEN assignee IS NULL THEN 'unassigned' ELSE 'assigned' END AS status\nFROM tasks\nWHERE assignee IS NOT NULL\nORDER BY id;\n",
+    "orderMatters": true,
+    "hints": [
+      "assignee = NULL is UNKNOWN for every row, so it would return nothing — use IS NOT NULL.",
+      "The CASE uses IS NULL to label rows; the WHERE keeps only the IS NOT NULL ones, so every surviving status is 'assigned'."
+    ],
+    "approaches": [
+      {
+        "name": "IS NOT NULL filter + CASE",
+        "sql": "SELECT id, title,\n       CASE WHEN assignee IS NULL THEN 'unassigned' ELSE 'assigned' END AS status\nFROM tasks\nWHERE assignee IS NOT NULL\nORDER BY id;",
+        "explanation": "1. The `CASE` uses `assignee IS NULL` (not `= NULL`) to classify each row as `'unassigned'` or `'assigned'`.\n2. The `WHERE assignee IS NOT NULL` keeps only rows that genuinely have an assignee. Tasks 2 and 4 (NULL assignee) are removed.\n3. Because every surviving row has a non-NULL assignee, its `status` is `'assigned'` — demonstrating that the filter and the label agree.\n4. If you had written `WHERE assignee = NULL`, the comparison would be UNKNOWN for all rows and the query would return nothing — that is the three-valued-logic trap this problem highlights. `ORDER BY id` gives a stable order."
+      },
+      {
+        "name": "filter on the CASE result",
+        "sql": "SELECT id, title, status\nFROM (\n  SELECT id, title,\n         CASE WHEN assignee IS NULL THEN 'unassigned' ELSE 'assigned' END AS status\n  FROM tasks\n) t\nWHERE status = 'assigned'\nORDER BY id;",
+        "explanation": "Compute the `status` label in a subquery, then keep only `status = 'assigned'` in the outer query. Since `status` is a plain non-NULL string here, ordinary `=` works on it. This returns the same assigned tasks (1, 3, 5) as filtering directly with `IS NOT NULL`."
+      }
+    ]
+  }
+]

@@ -1,14 +1,51 @@
 /**
- * Offline correctness gate: load every problem, run its solution against a
- * fresh SQLite db, and assert it executes and returns rows. Run with:
- *   npx tsx scripts/verify.mts
+ * Correctness gate. For every problem:
+ *   - run its grading oracle (solutionSql) on a fresh SQLite db -> expected
+ *   - assert expected is non-empty and deterministic
+ *   - run EVERY solution approach and assert it matches `expected`
+ *     (row order checked when orderMatters, else compared as a multiset)
+ *
+ * Run with:  npx tsx scripts/verify.mts
  */
 import initSqlJs from "sql.js";
 import { problems } from "../src/lib/problems/index";
 
 const SQL = await initSqlJs();
 
+function run(setup: string, sql: string) {
+  const db = new SQL.Database();
+  db.run(setup);
+  const res = db.exec(sql);
+  db.close();
+  const last = res[res.length - 1];
+  return last ? { columns: last.columns, values: last.values } : { columns: [], values: [] };
+}
+
+function cell(v: unknown): string {
+  if (v === null || v === undefined) return "␀";
+  if (typeof v === "number")
+    return Number.isInteger(v) ? String(v) : String(Math.round(v * 1e6) / 1e6);
+  return String(v);
+}
+const serialize = (row: unknown[]) => row.map(cell).join("");
+
+function sameRows(a: unknown[][], b: unknown[][], ordered: boolean): boolean {
+  if (a.length !== b.length) return false;
+  const sa = a.map(serialize);
+  const sb = b.map(serialize);
+  if (ordered) return sa.every((r, i) => r === sb[i]);
+  const counts = new Map<string, number>();
+  for (const r of sa) counts.set(r, (counts.get(r) ?? 0) + 1);
+  for (const r of sb) {
+    const c = counts.get(r);
+    if (!c) return false;
+    counts.set(r, c - 1);
+  }
+  return true;
+}
+
 let failures = 0;
+let approachCount = 0;
 const slugs = new Set<string>();
 
 for (const p of problems) {
@@ -18,57 +55,60 @@ for (const p of problems) {
   }
   slugs.add(p.slug);
 
-  // run twice to confirm determinism
-  let res1: ReturnType<typeof db1.exec>;
-  let res2;
-  let db1: import("sql.js").Database;
+  let expected;
   try {
-    db1 = new SQL.Database();
-    db1.run(p.setupSql);
-    res1 = db1.exec(p.solutionSql);
-    db1.close();
-    const db2 = new SQL.Database();
-    db2.run(p.setupSql);
-    res2 = db2.exec(p.solutionSql);
-    db2.close();
+    expected = run(p.setupSql, p.solutionSql);
+    const again = run(p.setupSql, p.solutionSql);
+    if (JSON.stringify(expected.values) !== JSON.stringify(again.values))
+      throw new Error("non-deterministic oracle");
   } catch (e) {
-    console.error(`\n✗ [${p.number}] ${p.slug}\n   ERROR: ${(e as Error).message}`);
+    console.error(`✗ [${p.number}] ${p.slug} — oracle error: ${(e as Error).message}`);
     failures++;
     continue;
   }
 
-  const r1 = res1[res1.length - 1];
-  if (!r1 || r1.values.length === 0) {
-    console.error(`\n✗ [${p.number}] ${p.slug}\n   solution returned 0 rows`);
+  if (expected.values.length === 0) {
+    console.error(`✗ [${p.number}] ${p.slug} — oracle returned 0 rows`);
     failures++;
     continue;
   }
 
-  // determinism check
-  const s1 = JSON.stringify(res1[res1.length - 1].values);
-  const s2 = JSON.stringify(res2[res2.length - 1].values);
-  if (s1 !== s2) {
-    console.error(`\n✗ [${p.number}] ${p.slug}\n   NON-DETERMINISTIC output`);
+  const approaches = p.approaches ?? [];
+  if (approaches.length === 0) {
+    console.error(`✗ [${p.number}] ${p.slug} — no approaches`);
     failures++;
     continue;
   }
 
-  // distinct-rows check for order-sensitive problems (cheap ambiguity guard)
-  if (p.orderMatters) {
-    const seen = new Set(r1.values.map((row) => JSON.stringify(row)));
-    const ambiguousNote =
-      seen.size !== r1.values.length ? "  ⚠ duplicate full rows" : "";
+  let ok = true;
+  for (const a of approaches) {
+    approachCount++;
+    try {
+      const got = run(p.setupSql, a.sql);
+      if (!sameRows(expected.values, got.values, p.orderMatters)) {
+        console.error(
+          `✗ [${p.number}] ${p.slug} — approach "${a.name}" does not match the oracle`,
+        );
+        ok = false;
+        failures++;
+      }
+    } catch (e) {
+      console.error(
+        `✗ [${p.number}] ${p.slug} — approach "${a.name}" raised: ${(e as Error).message}`,
+      );
+      ok = false;
+      failures++;
+    }
+  }
+
+  if (ok) {
     console.log(
-      `✓ [${String(p.number).padStart(2)}] ${p.slug.padEnd(34)} ${r1.columns.join(",").padEnd(40)} ${r1.values.length} rows${ambiguousNote}`,
-    );
-  } else {
-    console.log(
-      `✓ [${String(p.number).padStart(2)}] ${p.slug.padEnd(34)} ${r1.columns.join(",").padEnd(40)} ${r1.values.length} rows  (unordered)`,
+      `✓ [${String(p.number).padStart(3)}] ${p.slug.padEnd(38)} ${p.category.padEnd(20)} ${approaches.length} appr  ${expected.values.length} rows`,
     );
   }
 }
 
 console.log(
-  `\n${problems.length} problems, ${slugs.size} unique slugs, ${failures} failures`,
+  `\n${problems.length} problems · ${approachCount} approaches · ${slugs.size} unique slugs · ${failures} failures`,
 );
 process.exit(failures > 0 ? 1 : 0);

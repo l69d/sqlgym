@@ -1,14 +1,19 @@
-// Copy the sql.js WASM binary into /public so the browser can fetch it at
-// /sql-wasm.wasm. Runs automatically before every build (npm `prebuild`),
-// so deploys never depend on a stale committed copy.
+// Copy the sql.js WASM binaries into /public so the browser can fetch them.
+// Bundlers honour sql.js's `browser` field and load `sql-wasm-browser.js`,
+// which requests `sql-wasm-browser.wasm`; the plain build requests
+// `sql-wasm.wasm`. We copy both so locateFile (which returns `/<name>`)
+// always resolves regardless of which build the bundler picks.
+// Runs automatically before every build (npm `prebuild`).
 import { copyFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const src = resolve(root, "node_modules/sql.js/dist/sql-wasm.wasm");
-const dest = resolve(root, "public/sql-wasm.wasm");
+const dist = resolve(root, "node_modules/sql.js/dist");
+const publicDir = resolve(root, "public");
+mkdirSync(publicDir, { recursive: true });
 
-mkdirSync(dirname(dest), { recursive: true });
-copyFileSync(src, dest);
-console.log("copied sql-wasm.wasm -> public/");
+for (const name of ["sql-wasm.wasm", "sql-wasm-browser.wasm"]) {
+  copyFileSync(resolve(dist, name), resolve(publicDir, name));
+  console.log(`copied ${name} -> public/`);
+}

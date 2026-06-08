@@ -10,7 +10,7 @@ There is no backend and no database to provision — your SQL never leaves the
 page. Each problem checks your output against a canonical solution that is
 executed on the fly, so the expected answer is always in sync with the seed data.
 
-🌐 **Live:** _added after first deploy_
+🌐 **Live:** https://sqlgym.vercel.app
 
 ## What you practice
 

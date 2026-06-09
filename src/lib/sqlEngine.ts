@@ -1,5 +1,6 @@
 import type { Database, SqlJsStatic } from "sql.js";
-import type { CheckResult, Problem, QueryResult } from "./types";
+import type { CaseResult, CheckResult, Problem, QueryResult } from "./types";
+import { gradedCases } from "./types";
 
 let sqlPromise: Promise<SqlJsStatic> | null = null;
 
@@ -71,67 +72,141 @@ function sameRows(a: unknown[][], b: unknown[][], ordered: boolean): boolean {
   return true;
 }
 
+/** Dump every user table of a db (all rows — datasets are tiny). */
+function dumpTables(db: Database): { name: string; result: QueryResult }[] {
+  const tablesRes = db.exec(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+  );
+  if (tablesRes.length === 0) return [];
+  return tablesRes[0].values
+    .map((r) => String(r[0]))
+    .map((name) => ({ name, result: runQuery(db, `SELECT * FROM ${name}`) }));
+}
+
+/** The oracle's result on the visible example — what the question advertises. */
+export async function exampleExpected(problem: Problem): Promise<QueryResult> {
+  const db = await createDb(problem.setupSql);
+  try {
+    return runQuery(db, problem.solutionSql);
+  } finally {
+    db.close();
+  }
+}
+
 /**
- * Run the user's query against a fresh copy of the problem's data and compare
- * it to the canonical solution. The solution result is computed live so it is
- * always in sync with the seed data.
+ * Grade the user's query against EVERY dataset: the visible example plus every
+ * hidden edge case. For each one the canonical solution is recomputed live (so
+ * the oracle is always in sync with the seed data) and compared to the user's
+ * output. The submission is Accepted only if all of them match — the edge cases
+ * are engineered so a careless query slips on at least one.
  */
 export async function checkAnswer(
   problem: Problem,
   userSql: string,
 ): Promise<CheckResult> {
+  const cases = gradedCases(problem);
   if (!userSql.trim()) {
-    return { passed: false, message: "Write a query first." };
-  }
-
-  let expected: QueryResult;
-  let got: QueryResult;
-
-  // expected — run the canonical solution on its own clean db
-  try {
-    const db = await createDb(problem.setupSql);
-    expected = runQuery(db, problem.solutionSql);
-    db.close();
-  } catch (e) {
     return {
       passed: false,
-      message: "Internal error computing the expected answer.",
-      error: e instanceof Error ? e.message : String(e),
+      message: "Write a query first.",
+      cases: [],
+      passedCount: 0,
+      totalCount: cases.length,
     };
   }
 
-  // got — run the user's query on a separate clean db
-  try {
-    const db = await createDb(problem.setupSql);
-    got = runQuery(db, userSql);
-    db.close();
-  } catch (e) {
-    return {
-      passed: false,
-      message: "Your query raised an error.",
-      error: e instanceof Error ? e.message : String(e),
-    };
-  }
+  const results: CaseResult[] = [];
 
-  if (got.columns.length !== expected.columns.length) {
-    return {
-      passed: false,
-      message: `Wrong number of columns — expected ${expected.columns.length}, got ${got.columns.length}.`,
+  for (let i = 0; i < cases.length; i++) {
+    const c = cases[i];
+    let expected: QueryResult;
+    let got: QueryResult;
+
+    // oracle on this dataset (recomputed live)
+    try {
+      const db = await createDb(c.setupSql);
+      expected = runQuery(db, problem.solutionSql);
+      db.close();
+    } catch (e) {
+      results.push({
+        index: i,
+        name: c.name,
+        isExample: c.isExample,
+        passed: false,
+        message: "Internal error computing the expected answer.",
+        error: e instanceof Error ? e.message : String(e),
+      });
+      continue;
+    }
+
+    // user query on the same dataset
+    try {
+      const db = await createDb(c.setupSql);
+      got = runQuery(db, userSql);
+      db.close();
+    } catch (e) {
+      results.push({
+        index: i,
+        name: c.name,
+        isExample: c.isExample,
+        passed: false,
+        error: e instanceof Error ? e.message : String(e),
+        message: "Your query raised an error.",
+      });
+      continue;
+    }
+
+    let passed = got.columns.length === expected.columns.length;
+    let message: string | undefined;
+    if (!passed) {
+      message = `Wrong number of columns — expected ${expected.columns.length}, got ${got.columns.length}.`;
+    } else {
+      passed = sameRows(expected.rows, got.rows, problem.orderMatters);
+      if (!passed)
+        message = problem.orderMatters
+          ? "Rows or their order don't match."
+          : "Rows don't match.";
+    }
+
+    results.push({
+      index: i,
+      name: c.name,
+      isExample: c.isExample,
+      passed,
       expected,
       got,
-    };
+      message,
+    });
   }
 
-  const passed = sameRows(expected.rows, got.rows, problem.orderMatters);
+  const passedCount = results.filter((r) => r.passed).length;
+  const totalCount = cases.length;
+  const allPassed = passedCount === totalCount && totalCount > 0;
+
+  // surface the first failing case, with its input tables, for debugging
+  let firstFailure: CaseResult | undefined;
+  const fail = results.find((r) => !r.passed);
+  if (fail) {
+    let inputTables: { name: string; result: QueryResult }[] | undefined;
+    try {
+      const db = await createDb(cases[fail.index].setupSql);
+      inputTables = dumpTables(db);
+      db.close();
+    } catch {
+      /* leave inputTables undefined */
+    }
+    firstFailure = { ...fail, inputTables };
+  }
+
   return {
-    passed,
-    message: passed
-      ? "Accepted — your result matches the expected output."
-      : problem.orderMatters
-        ? "Wrong answer — the rows or their order don't match."
-        : "Wrong answer — the rows don't match.",
-    expected,
-    got,
+    passed: allPassed,
+    message: allPassed
+      ? `Accepted — passed all ${totalCount} test cases.`
+      : `Wrong Answer — passed ${passedCount} of ${totalCount} test cases.`,
+    cases: results,
+    passedCount,
+    totalCount,
+    firstFailure,
   };
 }
 

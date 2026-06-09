@@ -7,6 +7,7 @@ import { filteringProblems } from "./filtering";
 import { orderingProblems } from "./ordering";
 import { extendedProblems } from "./extended.generated";
 import { existingSolutions } from "./solutions.generated";
+import { problemEdgeCases } from "./edgecases.generated";
 
 // The original 29 problems, kept exactly as authored, interleaved so the list
 // doesn't read as six blocks.
@@ -50,10 +51,23 @@ function withApproaches(p: Problem): Problem {
   return { ...p, approaches };
 }
 
+// Backfill the hidden edge cases + trap from the central edgecases map, unless
+// the problem already defines them inline.
+function withEdgeCases(p: Problem): Problem {
+  const ec = problemEdgeCases[p.slug];
+  if (!ec) return p;
+  return {
+    ...p,
+    tests: p.tests ?? ec.tests,
+    trap: p.trap ?? ec.trap,
+  };
+}
+
 // Original problems first (so their numbers stay 1..29), then the new ones.
 export const problems: Problem[] = [...original, ...extendedProblems]
   .filter(Boolean)
   .map(withApproaches)
+  .map(withEdgeCases)
   .map((p, i) => ({ ...p, number: i + 1 }));
 
 export const problemBySlug: Record<string, Problem> = Object.fromEntries(

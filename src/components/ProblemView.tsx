@@ -7,6 +7,7 @@ import {
   checkAnswer,
   createDb,
   describeSchema,
+  exampleExpected,
   runQuery,
   type TableSchema,
 } from "@/lib/sqlEngine";
@@ -97,6 +98,7 @@ export function ProblemView({
   const [bottomTab, setBottomTab] = useState<BottomTab>("result");
 
   const [schema, setSchema] = useState<TableSchema[] | null>(null);
+  const [expected, setExpected] = useState<QueryResult | null>(null);
   const [runResult, setRunResult] = useState<QueryResult | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [verdict, setVerdict] = useState<CheckResult | null>(null);
@@ -140,6 +142,22 @@ export function ProblemView({
       alive = false;
     };
   }, [problem.setupSql]);
+
+  // compute the expected output (oracle on the example) for the prompt
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await exampleExpected(problem);
+        if (alive) setExpected(res);
+      } catch {
+        if (alive) setExpected(null);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [problem]);
 
   const onRun = useCallback(async () => {
     setBusy("run");
@@ -249,6 +267,40 @@ export function ProblemView({
                   Tables
                 </div>
                 <SchemaTables schema={schema} />
+              </div>
+
+              {/* expected output for the example, so you know the target shape */}
+              <div className="mt-6 border-t border-[var(--border)] pt-4">
+                <div className="mb-3 flex items-baseline gap-2">
+                  <span className="text-xs font-semibold tracking-wide text-[var(--muted)] uppercase">
+                    Expected output
+                  </span>
+                  <span className="text-[11px] text-[var(--muted)]">
+                    {problem.orderMatters
+                      ? "rows must come back in this order"
+                      : "row order doesn't matter"}
+                  </span>
+                </div>
+                {expected ? (
+                  <div className="overflow-hidden rounded-lg border border-[var(--border)]">
+                    <ResultGrid result={expected} highlight />
+                  </div>
+                ) : (
+                  <div className="text-sm text-[var(--muted)]">
+                    Computing expected output…
+                  </div>
+                )}
+                <p className="mt-2 text-xs text-[var(--muted)]">
+                  This is the result for the example data above. On{" "}
+                  <span className="text-white">Submit</span> your query is graded
+                  against this example plus{" "}
+                  <span className="text-white">
+                    {problem.tests?.length ?? 0} hidden edge case
+                    {(problem.tests?.length ?? 0) === 1 ? "" : "s"}
+                  </span>{" "}
+                  — {1 + (problem.tests?.length ?? 0)} test cases in all. A sloppy
+                  query that only fits the example won&apos;t pass.
+                </p>
               </div>
             </div>
           )}
@@ -471,16 +523,27 @@ function VerdictPanel({
   if (!verdict) {
     return (
       <div className="px-3 py-4 text-sm text-[var(--muted)]">
-        Press <span className="text-white">Submit</span> to check your answer
-        against the expected result.
+        Press <span className="text-white">Submit</span> to run your query
+        against all test cases — the visible example plus the hidden edge cases.
       </div>
     );
   }
 
+  // grading couldn't even start (e.g. empty editor) — no per-case checklist
+  if (verdict.cases.length === 0) {
+    return (
+      <div className="px-3 py-4 text-sm text-[var(--muted)]">
+        {verdict.message}
+      </div>
+    );
+  }
+
+  const fail = verdict.firstFailure;
+
   return (
-    <div className="p-3">
+    <div className="space-y-3 p-3">
       <div
-        className={`mb-3 flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold ${
+        className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold ${
           verdict.passed
             ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
             : "border-rose-500/40 bg-rose-500/10 text-rose-300"
@@ -490,39 +553,103 @@ function VerdictPanel({
         <span className="font-normal opacity-80">{verdict.message}</span>
       </div>
 
-      {verdict.error && (
-        <pre className="mb-3 whitespace-pre-wrap rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">
-          {verdict.error}
-        </pre>
-      )}
+      {/* per-case checklist */}
+      <div className="overflow-hidden rounded-lg border border-[var(--border)]">
+        {verdict.cases.map((c) => (
+          <div
+            key={c.index}
+            className={`flex items-center gap-2 border-b border-[var(--border)]/60 px-3 py-1.5 text-sm last:border-b-0 ${
+              fail && c.index === fail.index ? "bg-rose-500/5" : ""
+            }`}
+          >
+            <span className={c.passed ? "text-emerald-400" : "text-rose-400"}>
+              {c.passed ? "✓" : "✗"}
+            </span>
+            <span className="text-[var(--muted)]">
+              Test {c.index + 1}
+            </span>
+            <span className="text-white">{c.name}</span>
+            {c.isExample && (
+              <span className="rounded-full border border-[var(--border)] px-1.5 text-[10px] text-[var(--muted)]">
+                visible
+              </span>
+            )}
+            {!c.passed && c.error && (
+              <span className="ml-auto truncate font-mono text-[11px] text-rose-300">
+                error
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
 
       {verdict.passed && nextSlug && (
         <Link
           href={`/problems/${nextSlug}`}
-          className="mb-3 inline-block rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-semibold text-[#06281d] hover:bg-emerald-300"
+          className="inline-block rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-semibold text-[#06281d] hover:bg-emerald-300"
         >
           Next problem →
         </Link>
       )}
 
-      {!verdict.passed && verdict.expected && verdict.got && (
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-          <div>
-            <div className="mb-1 text-xs font-semibold tracking-wide text-emerald-300 uppercase">
-              Expected{orderMatters ? " (order matters)" : ""}
-            </div>
-            <div className="overflow-hidden rounded-lg border border-[var(--border)]">
-              <ResultGrid result={verdict.expected} highlight />
-            </div>
+      {/* detail of the first failing case */}
+      {fail && (
+        <div className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--panel-2)]/40 p-3">
+          <div className="text-xs font-semibold tracking-wide text-rose-300 uppercase">
+            Failing on test {fail.index + 1}: {fail.name}
+            {fail.isExample ? " (the visible example)" : " (hidden edge case)"}
           </div>
-          <div>
-            <div className="mb-1 text-xs font-semibold tracking-wide text-rose-300 uppercase">
-              Your output
+
+          {fail.error ? (
+            <pre className="whitespace-pre-wrap rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">
+              {fail.error}
+            </pre>
+          ) : (
+            fail.message && (
+              <div className="text-sm text-[var(--muted)]">{fail.message}</div>
+            )
+          )}
+
+          {fail.inputTables && fail.inputTables.length > 0 && (
+            <div>
+              <div className="mb-1 text-[11px] font-semibold tracking-wide text-[var(--muted)] uppercase">
+                Input for this test
+              </div>
+              <div className="space-y-2">
+                {fail.inputTables.map((t) => (
+                  <div key={t.name}>
+                    <span className="font-mono text-xs text-[var(--accent)]">
+                      {t.name}
+                    </span>
+                    <div className="overflow-hidden rounded-lg border border-[var(--border)]">
+                      <ResultGrid result={t.result} emptyLabel="empty table" />
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="overflow-hidden rounded-lg border border-[var(--border)]">
-              <ResultGrid result={verdict.got} />
+          )}
+
+          {fail.expected && fail.got && (
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+              <div>
+                <div className="mb-1 text-xs font-semibold tracking-wide text-emerald-300 uppercase">
+                  Expected{orderMatters ? " (order matters)" : ""}
+                </div>
+                <div className="overflow-hidden rounded-lg border border-[var(--border)]">
+                  <ResultGrid result={fail.expected} highlight />
+                </div>
+              </div>
+              <div>
+                <div className="mb-1 text-xs font-semibold tracking-wide text-rose-300 uppercase">
+                  Your output
+                </div>
+                <div className="overflow-hidden rounded-lg border border-[var(--border)]">
+                  <ResultGrid result={fail.got} />
+                </div>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
     </div>

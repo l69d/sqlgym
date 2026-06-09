@@ -77,6 +77,7 @@ const EXISTING_SLUGS = new Set([
 const errors = [];
 const newProblems = [];
 const solutionsBySlug = {};
+const edgeCasesBySlug = {};
 
 if (!existsSync(dataDir)) {
   console.error(`No data dir at ${dataDir}`);
@@ -93,6 +94,26 @@ function isApproach(a) {
     a.sql.trim() &&
     typeof a.explanation === "string" &&
     a.explanation.trim()
+  );
+}
+
+function isTest(t) {
+  return (
+    t &&
+    typeof t.name === "string" &&
+    t.name.trim() &&
+    typeof t.setupSql === "string" &&
+    t.setupSql.trim()
+  );
+}
+
+function isTrap(t) {
+  return (
+    t &&
+    typeof t.sql === "string" &&
+    t.sql.trim() &&
+    typeof t.note === "string" &&
+    t.note.trim()
   );
 }
 
@@ -119,6 +140,20 @@ for (const file of files) {
     continue;
   }
 
+  // edgecases.json: { slug: { tests: [4x {name,setupSql}], trap: {sql,note} } }
+  // The map is keyed by slug and backfilled onto every problem in index.ts.
+  // (slug existence is checked after all problems are known.)
+  if (file === "edgecases.json") {
+    for (const [slug, ec] of Object.entries(parsed)) {
+      if (!ec || !Array.isArray(ec.tests) || ec.tests.length !== 4 || !ec.tests.every(isTest))
+        errors.push(`edgecases.json: '${slug}' needs exactly 4 tests (each with name + setupSql)`);
+      if (!isTrap(ec?.trap))
+        errors.push(`edgecases.json: '${slug}' has a missing/malformed trap (needs sql + note)`);
+      edgeCasesBySlug[slug] = { tests: ec?.tests, trap: ec?.trap };
+    }
+    continue;
+  }
+
   // *.problems.json
   if (!Array.isArray(parsed)) {
     errors.push(`${file}: expected a JSON array of problems`);
@@ -141,6 +176,13 @@ for (const file of files) {
       errors.push(`${file}/${id}: orderMatters must be boolean`);
     if (!Array.isArray(p.approaches) || !p.approaches.every(isApproach) || p.approaches.length === 0)
       errors.push(`${file}/${id}: missing/malformed approaches`);
+    // tests + trap are optional in the generator (so it can run mid-migration);
+    // the "exactly 4 edge cases + a working trap" requirement is enforced by
+    // scripts/verify.mts. Here we only reject malformed shapes.
+    if (p.tests !== undefined && (!Array.isArray(p.tests) || !p.tests.every(isTest)))
+      errors.push(`${file}/${id}: malformed tests (each needs name + setupSql)`);
+    if (p.trap !== undefined && !isTrap(p.trap))
+      errors.push(`${file}/${id}: malformed trap (needs sql + note)`);
     newProblems.push(p);
   }
 }
@@ -151,6 +193,10 @@ for (const p of newProblems) {
   if (seen.has(p.slug)) errors.push(`duplicate slug: ${p.slug}`);
   seen.add(p.slug);
 }
+
+// every edgecases entry must reference a real problem
+for (const slug of Object.keys(edgeCasesBySlug))
+  if (!seen.has(slug)) errors.push(`edgecases.json: '${slug}' is not a known problem slug`);
 
 if (errors.length) {
   console.error("VALIDATION FAILED:\n" + errors.map((e) => "  - " + e).join("\n"));
@@ -191,6 +237,15 @@ writeFileSync(
     ";\n",
 );
 
+writeFileSync(
+  resolve(outDir, "edgecases.generated.ts"),
+  header +
+    'import type { ProblemTest, TrapQuery } from "../types";\n\n' +
+    "export const problemEdgeCases: Record<string, { tests: ProblemTest[]; trap: TrapQuery }> = " +
+    JSON.stringify(edgeCasesBySlug, null, 2) +
+    ";\n",
+);
+
 console.log(
-  `generated ${newProblems.length} new problems + solutions for ${Object.keys(solutionsBySlug).length} existing problems`,
+  `generated ${newProblems.length} new problems + solutions for ${Object.keys(solutionsBySlug).length} existing problems + edge cases for ${Object.keys(edgeCasesBySlug).length} problems`,
 );

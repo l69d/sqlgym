@@ -1,0 +1,2426 @@
+{
+  "above-average-headcount": {
+    "tests": [
+      {
+        "name": "All departments equal headcount — empty result",
+        "setupSql": "CREATE TABLE employees (name TEXT, dept TEXT);\nINSERT INTO employees (name, dept) VALUES\n  ('e1', 'Alpha'), ('e2', 'Alpha'),\n  ('e3', 'Beta'), ('e4', 'Beta'),\n  ('e5', 'Gamma'), ('e6', 'Gamma');"
+      },
+      {
+        "name": "Exactly-at-average dept excluded (strict > not >=)",
+        "setupSql": "CREATE TABLE employees (name TEXT, dept TEXT);\nINSERT INTO employees (name, dept) VALUES\n  ('e1', 'A'), ('e2', 'A'), ('e3', 'A'),\n  ('e4', 'B'), ('e5', 'B'), ('e6', 'B'),\n  ('e7', 'C'),\n  ('e8', 'D'), ('e9', 'D'), ('e10', 'D'), ('e11', 'D'), ('e12', 'D');"
+      },
+      {
+        "name": "Tie in cnt — ORDER BY dept tiebreaker",
+        "setupSql": "CREATE TABLE employees (name TEXT, dept TEXT);\nINSERT INTO employees (name, dept) VALUES\n  ('e1', 'Zebra'), ('e2', 'Zebra'), ('e3', 'Zebra'), ('e4', 'Zebra'),\n  ('e5', 'Alpha'), ('e6', 'Alpha'), ('e7', 'Alpha'), ('e8', 'Alpha'),\n  ('e9', 'Mango'),\n  ('e10', 'Nano');"
+      },
+      {
+        "name": "Single department — empty result",
+        "setupSql": "CREATE TABLE employees (name TEXT, dept TEXT);\nINSERT INTO employees (name, dept) VALUES\n  ('e1', 'Solo'), ('e2', 'Solo'), ('e3', 'Solo');"
+      }
+    ],
+    "trap": {
+      "sql": "WITH counts AS (\n  SELECT dept, COUNT(*) AS cnt FROM employees GROUP BY dept\n)\nSELECT dept, cnt\nFROM counts\nWHERE cnt >= (SELECT AVG(cnt) FROM counts)\nORDER BY cnt DESC, dept;",
+      "note": "Uses >= instead of > — passes the example (no dept sits exactly at the average there) but wrongly includes depts whose headcount equals the average when a dept is exactly at the mean."
+    }
+  },
+  "above-average-spenders": {
+    "tests": [
+      {
+        "name": "Exact boundary excluded",
+        "setupSql": "CREATE TABLE orders (id INTEGER, customer TEXT, amount REAL);\nINSERT INTO orders (id, customer, amount) VALUES\n  (1, 'Ava', 100),\n  (2, 'Ava', 100),\n  (3, 'Ben', 200),\n  (4, 'Ben', 200),\n  (5, 'Cyd', 50),\n  (6, 'Cyd', 50);\n-- global avg = (100+100+200+200+50+50)/6 = 116.67; Ava avg=100, Ben avg=200, Cyd avg=50\n-- Only Ben qualifies (200 > 116.67), Ava is below"
+      },
+      {
+        "name": "Single customer all orders",
+        "setupSql": "CREATE TABLE orders (id INTEGER, customer TEXT, amount REAL);\nINSERT INTO orders (id, customer, amount) VALUES\n  (1, 'Solo', 100),\n  (2, 'Solo', 200),\n  (3, 'Solo', 300);\n-- only one customer, global avg = 200 = cust_avg, strictly > fails => empty result"
+      },
+      {
+        "name": "All same amount empty result",
+        "setupSql": "CREATE TABLE orders (id INTEGER, customer TEXT, amount REAL);\nINSERT INTO orders (id, customer, amount) VALUES\n  (1, 'Ann', 150),\n  (2, 'Bob', 150),\n  (3, 'Cat', 150);\n-- every customer avg = global avg = 150, no one is strictly above => empty result"
+      },
+      {
+        "name": "Customer avg above via low and high orders",
+        "setupSql": "CREATE TABLE orders (id INTEGER, customer TEXT, amount REAL);\nINSERT INTO orders (id, customer, amount) VALUES\n  (1, 'Ava', 10),\n  (2, 'Ava', 490),\n  (3, 'Ben', 50),\n  (4, 'Ben', 60),\n  (5, 'Cyd', 70),\n  (6, 'Cyd', 80);\n-- global avg = (10+490+50+60+70+80)/6 = 760/6 = 126.67\n-- Ava avg = (10+490)/2 = 250 > 126.67 (qualifies)\n-- Ben avg = (50+60)/2 = 55 < 126.67 (no)\n-- Cyd avg = (70+80)/2 = 75 < 126.67 (no)\n-- Trap: someone filtering WHERE amount > global_avg would INCLUDE 490 for Ava but exclude 10, giving wrong result"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT customer, ROUND(AVG(amount), 2) AS cust_avg\nFROM orders\nWHERE amount > (SELECT AVG(amount) FROM orders)\nGROUP BY customer\nORDER BY cust_avg DESC;",
+      "note": "Filters individual order rows by global avg instead of comparing per-customer averages to global avg; misidentifies customers when some orders are above and some below the global average."
+    }
+  },
+  "age-in-whole-years": {
+    "tests": [
+      {
+        "name": "Born after ref date",
+        "setupSql": "CREATE TABLE people (name TEXT, birthday TEXT);\nINSERT INTO people (name, birthday) VALUES\n  ('Alice', '2000-01-01'),\n  ('Bob',   '2024-07-04');"
+      },
+      {
+        "name": "Leap day birthday",
+        "setupSql": "CREATE TABLE people (name TEXT, birthday TEXT);\nINSERT INTO people (name, birthday) VALUES\n  ('Finn', '1988-02-29'),\n  ('Gale', '2000-02-29');"
+      },
+      {
+        "name": "Age zero born on ref date",
+        "setupSql": "CREATE TABLE people (name TEXT, birthday TEXT);\nINSERT INTO people (name, birthday) VALUES\n  ('Solo', '2024-06-15');"
+      },
+      {
+        "name": "Varying months same birth year",
+        "setupSql": "CREATE TABLE people (name TEXT, birthday TEXT);\nINSERT INTO people (name, birthday) VALUES\n  ('Uma', '1995-07-20'),\n  ('Val', '1995-05-01'),\n  ('Wei', '1995-06-15');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT name, birthday,\n       CAST(strftime('%Y', '2024-06-15') AS INTEGER) - CAST(strftime('%Y', birthday) AS INTEGER)\n       - CASE WHEN strftime('%m%d', '2024-06-15') < strftime('%m%d', birthday) THEN 1 ELSE 0 END AS age\nFROM people ORDER BY name;",
+      "note": "Uses year subtraction with month-day adjustment instead of the YYYYMMDD integer trick; gives -1 (not 0) for anyone born after the reference date because integer division in SQLite truncates toward zero while year subtraction floors."
+    }
+  },
+  "all-active-people-union": {
+    "tests": [
+      {
+        "name": "No overlap between tables",
+        "setupSql": "CREATE TABLE employees (name TEXT);\nINSERT INTO employees (name) VALUES\n  ('Alice'), ('Bob'), ('Carol');\n\nCREATE TABLE contractors (name TEXT);\nINSERT INTO contractors (name) VALUES\n  ('Dave'), ('Eve'), ('Frank');"
+      },
+      {
+        "name": "Complete overlap — all names in both tables",
+        "setupSql": "CREATE TABLE employees (name TEXT);\nINSERT INTO employees (name) VALUES\n  ('Alice'), ('Bob'), ('Carol');\n\nCREATE TABLE contractors (name TEXT);\nINSERT INTO contractors (name) VALUES\n  ('Alice'), ('Bob'), ('Carol');"
+      },
+      {
+        "name": "Empty employees table",
+        "setupSql": "CREATE TABLE employees (name TEXT);\n\nCREATE TABLE contractors (name TEXT);\nINSERT INTO contractors (name) VALUES\n  ('Dave'), ('Eve'), ('Frank');"
+      },
+      {
+        "name": "NULL name in contractors — NOT IN trap exposed",
+        "setupSql": "CREATE TABLE employees (name TEXT);\nINSERT INTO employees (name) VALUES\n  ('Ada'), ('Bea');\n\nCREATE TABLE contractors (name TEXT);\nINSERT INTO contractors (name) VALUES\n  ('Bea'), ('Dev'), (NULL);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT name FROM employees\nUNION\nSELECT name FROM contractors WHERE name NOT IN (SELECT name FROM employees)\nORDER BY name;",
+      "note": "Uses NOT IN subquery to manually exclude overlap — silently drops NULL contractor names because NULL NOT IN (...) evaluates to NULL (unknown), not TRUE, so NULLs are filtered out instead of being included in the union."
+    }
+  },
+  "all-students-and-all-memberships-fullouter": {
+    "tests": [
+      {
+        "name": "All orphan memberships, students have no memberships",
+        "setupSql": "CREATE TABLE students (id INTEGER, name TEXT);\nINSERT INTO students VALUES\n  (1, 'Alice'), (2, 'Bob');\nCREATE TABLE memberships (student_id INTEGER, club TEXT);\nINSERT INTO memberships VALUES\n  (10, 'Art'), (20, 'Drama'), (30, 'Chess');"
+      },
+      {
+        "name": "Empty memberships table",
+        "setupSql": "CREATE TABLE students (id INTEGER, name TEXT);\nINSERT INTO students VALUES\n  (1, 'Carlos'), (2, 'Diana'), (3, 'Eve');\nCREATE TABLE memberships (student_id INTEGER, club TEXT);"
+      },
+      {
+        "name": "NULL student id exposes NOT IN trap",
+        "setupSql": "CREATE TABLE students (id INTEGER, name TEXT);\nINSERT INTO students VALUES\n  (1, 'Frank'), (NULL, 'Grace'), (3, 'Hana');\nCREATE TABLE memberships (student_id INTEGER, club TEXT);\nINSERT INTO memberships VALUES\n  (1, 'Band'), (3, 'Chess'), (99, 'Drama');"
+      },
+      {
+        "name": "All students matched, no orphan memberships",
+        "setupSql": "CREATE TABLE students (id INTEGER, name TEXT);\nINSERT INTO students VALUES\n  (1, 'Ivan'), (2, 'Julia'), (3, 'Ken');\nCREATE TABLE memberships (student_id INTEGER, club TEXT);\nINSERT INTO memberships VALUES\n  (1, 'Art'), (1, 'Band'), (2, 'Chess'), (3, 'Drama'), (3, 'Film');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT s.name AS student, m.club AS club\nFROM students s\nLEFT JOIN memberships m ON m.student_id = s.id\nUNION ALL\nSELECT NULL AS student, m.club AS club\nFROM memberships m\nWHERE m.student_id NOT IN (SELECT id FROM students)\nORDER BY student NULLS LAST, club NULLS LAST;",
+      "note": "Uses NOT IN (SELECT id FROM students) to find orphan memberships — silently returns no orphans when students contains a NULL id, because x NOT IN (set containing NULL) is always NULL/unknown in 3-valued logic."
+    }
+  },
+  "assign-letter-grades-band-join": {
+    "tests": [
+      {
+        "name": "Exact hi boundary scores",
+        "setupSql": "CREATE TABLE scores (student TEXT, score INTEGER);\nINSERT INTO scores VALUES\n  ('Ava', 89), ('Ben', 79), ('Cal', 69), ('Dee', 59), ('Eve', 100);\nCREATE TABLE grades (grade TEXT, lo INTEGER, hi INTEGER);\nINSERT INTO grades VALUES\n  ('A', 90, 100), ('B', 80, 89), ('C', 70, 79), ('D', 60, 69), ('F', 0, 59);"
+      },
+      {
+        "name": "Exact lo boundary scores",
+        "setupSql": "CREATE TABLE scores (student TEXT, score INTEGER);\nINSERT INTO scores VALUES\n  ('Al', 90), ('Bo', 80), ('Ce', 70), ('Do', 60), ('El', 0);\nCREATE TABLE grades (grade TEXT, lo INTEGER, hi INTEGER);\nINSERT INTO grades VALUES\n  ('A', 90, 100), ('B', 80, 89), ('C', 70, 79), ('D', 60, 69), ('F', 0, 59);"
+      },
+      {
+        "name": "Ties broken by student name",
+        "setupSql": "CREATE TABLE scores (student TEXT, score INTEGER);\nINSERT INTO scores VALUES\n  ('Zara', 85), ('Anna', 85), ('Mike', 85), ('Lucy', 72), ('Tom', 72);\nCREATE TABLE grades (grade TEXT, lo INTEGER, hi INTEGER);\nINSERT INTO grades VALUES\n  ('A', 90, 100), ('B', 80, 89), ('C', 70, 79), ('D', 60, 69), ('F', 0, 59);"
+      },
+      {
+        "name": "Single student single grade",
+        "setupSql": "CREATE TABLE scores (student TEXT, score INTEGER);\nINSERT INTO scores VALUES\n  ('Solo', 95);\nCREATE TABLE grades (grade TEXT, lo INTEGER, hi INTEGER);\nINSERT INTO grades VALUES\n  ('A', 90, 100), ('B', 80, 89), ('C', 70, 79), ('D', 60, 69), ('F', 0, 59);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT s.student, s.score, g.grade\nFROM scores s\nJOIN grades g ON s.score >= g.lo AND s.score < g.hi\nORDER BY s.score DESC, s.student;",
+      "note": "Uses strict less-than (<) on the hi boundary instead of <=, so scores exactly equal to a band's hi value (e.g. 89, 79, 59) match no band and are silently dropped from the result."
+    }
+  },
+  "big-spenders-having": {
+    "tests": [
+      {
+        "name": "Boundary exactly 100",
+        "setupSql": "CREATE TABLE payments (customer TEXT, amount INTEGER);\nINSERT INTO payments (customer, amount) VALUES\n  ('Ada',  50),\n  ('Ada',  50),\n  ('Bea',  49),\n  ('Bea',  50),\n  ('Cleo', 200);"
+      },
+      {
+        "name": "Single payment qualifies",
+        "setupSql": "CREATE TABLE payments (customer TEXT, amount INTEGER);\nINSERT INTO payments (customer, amount) VALUES\n  ('Alice', 150),\n  ('Bob',   40),\n  ('Carol', 30);"
+      },
+      {
+        "name": "Tie-breaking same total",
+        "setupSql": "CREATE TABLE payments (customer TEXT, amount INTEGER);\nINSERT INTO payments (customer, amount) VALUES\n  ('Zara', 60),\n  ('Zara', 60),\n  ('Anna', 80),\n  ('Anna', 40),\n  ('Mike', 50),\n  ('Mike', 50);"
+      },
+      {
+        "name": "Empty result",
+        "setupSql": "CREATE TABLE payments (customer TEXT, amount INTEGER);\nINSERT INTO payments (customer, amount) VALUES\n  ('Ada',  30),\n  ('Bea',  20),\n  ('Cleo', 99);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT customer, SUM(amount) AS total_spent\nFROM payments\nGROUP BY customer\nHAVING SUM(amount) >= 100\nORDER BY total_spent DESC;",
+      "note": "Omits the secondary ORDER BY customer ASC — ties in total_spent may appear in arbitrary order instead of alphabetical, producing wrong output when two customers share the same total."
+    }
+  },
+  "books-by-prolific-authors": {
+    "tests": [
+      {
+        "name": "All authors prolific",
+        "setupSql": "CREATE TABLE books (id INTEGER, title TEXT, author TEXT);\nINSERT INTO books (id, title, author) VALUES\n  (1, 'Book A',   'Alpha'),\n  (2, 'Book B',   'Alpha'),\n  (3, 'Book C',   'Beta'),\n  (4, 'Book D',   'Beta'),\n  (5, 'Book E',   'Gamma'),\n  (6, 'Book F',   'Gamma'),\n  (7, 'Book G',   'Gamma');"
+      },
+      {
+        "name": "Exactly two books qualifies",
+        "setupSql": "CREATE TABLE books (id INTEGER, title TEXT, author TEXT);\nINSERT INTO books (id, title, author) VALUES\n  (1, 'Solo Work',  'Loner'),\n  (2, 'First Book', 'Duo'),\n  (3, 'Second Book','Duo'),\n  (4, 'Only One',   'Alone');"
+      },
+      {
+        "name": "NULL author excluded by IN",
+        "setupSql": "CREATE TABLE books (id INTEGER, title TEXT, author TEXT);\nINSERT INTO books (id, title, author) VALUES\n  (1, 'Book One',   'Writer'),\n  (2, 'Book Two',   'Writer'),\n  (3, 'Anonymous1', NULL),\n  (4, 'Standalone', 'Solo');"
+      },
+      {
+        "name": "Empty result when no prolific authors",
+        "setupSql": "CREATE TABLE books (id INTEGER, title TEXT, author TEXT);\nINSERT INTO books (id, title, author) VALUES\n  (1, 'Only Book', 'Author A'),\n  (2, 'One Novel', 'Author B'),\n  (3, 'A Story',   'Author C');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT title AS title, author AS author\nFROM books\nWHERE author NOT IN (\n  SELECT author\n  FROM books\n  GROUP BY author\n  HAVING COUNT(*) < 2\n)\nORDER BY author, title;",
+      "note": "NOT IN returns no rows when the subquery contains NULL (because NOT IN with NULL uses 3-valued logic: unknown), so when any book has a NULL author the entire result set becomes empty instead of returning the non-NULL prolific authors."
+    }
+  },
+  "bought-every-product": {
+    "tests": [
+      {
+        "name": "Only one customer buys all products",
+        "setupSql": "CREATE TABLE products (id INTEGER, name TEXT);\nINSERT INTO products (id, name) VALUES (1, 'Pen'), (2, 'Pad'), (3, 'Ink');\n\nCREATE TABLE purchases (customer TEXT, product_id INTEGER);\nINSERT INTO purchases (customer, product_id) VALUES\n  ('Ada', 1), ('Ada', 2), ('Ada', 3),\n  ('Bea', 1), ('Bea', 2),\n  ('Cleo', 3);"
+      },
+      {
+        "name": "No customer bought all products - empty result",
+        "setupSql": "CREATE TABLE products (id INTEGER, name TEXT);\nINSERT INTO products (id, name) VALUES (1, 'Pen'), (2, 'Pad'), (3, 'Ink');\n\nCREATE TABLE purchases (customer TEXT, product_id INTEGER);\nINSERT INTO purchases (customer, product_id) VALUES\n  ('Ada', 1), ('Ada', 2),\n  ('Bea', 2), ('Bea', 3),\n  ('Cleo', 1), ('Cleo', 3);"
+      },
+      {
+        "name": "Single product universe",
+        "setupSql": "CREATE TABLE products (id INTEGER, name TEXT);\nINSERT INTO products (id, name) VALUES (1, 'Pen');\n\nCREATE TABLE purchases (customer TEXT, product_id INTEGER);\nINSERT INTO purchases (customer, product_id) VALUES\n  ('Ada', 1),\n  ('Bea', 1), ('Bea', 1),\n  ('Cleo', 1);"
+      },
+      {
+        "name": "Products table has a product nobody ever bought",
+        "setupSql": "CREATE TABLE products (id INTEGER, name TEXT);\nINSERT INTO products (id, name) VALUES (1, 'Pen'), (2, 'Pad'), (3, 'Ink'), (4, 'Ruler');\n\nCREATE TABLE purchases (customer TEXT, product_id INTEGER);\nINSERT INTO purchases (customer, product_id) VALUES\n  ('Ada', 1), ('Ada', 2), ('Ada', 3),\n  ('Bea', 1), ('Bea', 2), ('Bea', 3),\n  ('Cleo', 1);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT customer\nFROM purchases\nGROUP BY customer\nHAVING COUNT(DISTINCT product_id) = (SELECT COUNT(DISTINCT product_id) FROM purchases)\nORDER BY customer;",
+      "note": "Compares each customer's distinct product count to the total distinct products ever purchased (from purchases) instead of the total product catalogue size (from products) — matches the example when all products happen to be purchased by someone, but wrongly includes partial buyers when some products in the catalogue are never purchased by anyone."
+    }
+  },
+  "bought-x-not-y": {
+    "tests": [
+      {
+        "name": "NULL customer poisons NOT IN",
+        "setupSql": "CREATE TABLE purchases (customer TEXT, product TEXT);\nINSERT INTO purchases (customer, product) VALUES\n  ('Alice', 'Camera'),\n  ('Bob',   'Camera'),\n  ('Bob',   'Lens'),\n  ('Carol', 'Lens'),\n  (NULL,    'Lens');"
+      },
+      {
+        "name": "Duplicate Camera rows no dedup",
+        "setupSql": "CREATE TABLE purchases (customer TEXT, product TEXT);\nINSERT INTO purchases (customer, product) VALUES\n  ('Eve',   'Camera'),\n  ('Eve',   'Camera'),\n  ('Eve',   'Camera'),\n  ('Frank', 'Camera'),\n  ('Frank', 'Lens'),\n  ('Gina',  'Lens');"
+      },
+      {
+        "name": "Empty result all Camera buyers have Lens",
+        "setupSql": "CREATE TABLE purchases (customer TEXT, product TEXT);\nINSERT INTO purchases (customer, product) VALUES\n  ('Han',  'Camera'),\n  ('Han',  'Lens'),\n  ('Iris', 'Camera'),\n  ('Iris', 'Lens'),\n  ('Jay',  'Tripod');"
+      },
+      {
+        "name": "Many products Camera buyer no Lens",
+        "setupSql": "CREATE TABLE purchases (customer TEXT, product TEXT);\nINSERT INTO purchases (customer, product) VALUES\n  ('Kim',  'Camera'),\n  ('Kim',  'Tripod'),\n  ('Kim',  'Bag'),\n  ('Kim',  'Filter'),\n  ('Leo',  'Camera'),\n  ('Leo',  'Lens'),\n  ('Mia',  'Bag'),\n  ('Mia',  'Tripod');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT DISTINCT customer\nFROM purchases\nWHERE product = 'Camera'\n  AND customer NOT IN (\n        SELECT customer FROM purchases WHERE product = 'Lens'\n      )\nORDER BY customer;",
+      "note": "NOT IN returns empty when the subquery contains a NULL customer, because NULL comparisons yield UNKNOWN and the whole IN-list fails; EXISTS/NOT EXISTS handles NULLs correctly."
+    }
+  },
+  "build-full-name": {
+    "tests": [
+      {
+        "name": "id order differs from first_name alpha order",
+        "setupSql": "CREATE TABLE employees (id INTEGER, first_name TEXT, last_name TEXT);\nINSERT INTO employees (id, first_name, last_name) VALUES\n  (1, 'Zara', 'Ahmed'),\n  (2, 'Alice', 'Brown'),\n  (3, 'Martin', 'Chen'),\n  (4, 'Bob', 'Davis');"
+      },
+      {
+        "name": "single row",
+        "setupSql": "CREATE TABLE employees (id INTEGER, first_name TEXT, last_name TEXT);\nINSERT INTO employees (id, first_name, last_name) VALUES\n  (7, 'Marie', 'Curie');"
+      },
+      {
+        "name": "non-sequential large ids",
+        "setupSql": "CREATE TABLE employees (id INTEGER, first_name TEXT, last_name TEXT);\nINSERT INTO employees (id, first_name, last_name) VALUES\n  (10, 'Nikola', 'Tesla'),\n  (25, 'Albert', 'Einstein'),\n  (30, 'Isaac', 'Newton'),\n  (100, 'Carl', 'Sagan');"
+      },
+      {
+        "name": "names with hyphen and mixed case",
+        "setupSql": "CREATE TABLE employees (id INTEGER, first_name TEXT, last_name TEXT);\nINSERT INTO employees (id, first_name, last_name) VALUES\n  (1, 'Mary-Jane', 'Watson'),\n  (2, 'Jean-Luc', 'Picard'),\n  (3, 'anne', 'frank');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT id,\n       first_name || ' ' || last_name AS full_name\nFROM employees\nORDER BY first_name;",
+      "note": "Orders by first_name instead of id; matches example because first_name alpha order happens to equal id order in the example, but diverges when rows have ids assigned out of alphabetical first_name order."
+    }
+  },
+  "build-org-path": {
+    "tests": [
+      {
+        "name": "Single employee (root only)",
+        "setupSql": "CREATE TABLE employees (id INTEGER, name TEXT, manager_id INTEGER);\nINSERT INTO employees (id, name, manager_id) VALUES\n  (1, 'Alice', NULL);"
+      },
+      {
+        "name": "Deep chain (5 levels)",
+        "setupSql": "CREATE TABLE employees (id INTEGER, name TEXT, manager_id INTEGER);\nINSERT INTO employees (id, name, manager_id) VALUES\n  (1, 'Alpha', NULL),\n  (2, 'Beta', 1),\n  (3, 'Gamma', 2),\n  (4, 'Delta', 3),\n  (5, 'Epsilon', 4),\n  (6, 'Zeta', 5);"
+      },
+      {
+        "name": "Two separate trees (two roots)",
+        "setupSql": "CREATE TABLE employees (id INTEGER, name TEXT, manager_id INTEGER);\nINSERT INTO employees (id, name, manager_id) VALUES\n  (1, 'Alice', NULL),\n  (2, 'Bob', 1),\n  (3, 'Carol', 1),\n  (10, 'Xavier', NULL),\n  (11, 'Yara', 10),\n  (12, 'Zoe', 10);"
+      },
+      {
+        "name": "Duplicate names at different levels",
+        "setupSql": "CREATE TABLE employees (id INTEGER, name TEXT, manager_id INTEGER);\nINSERT INTO employees (id, name, manager_id) VALUES\n  (1, 'Alice', NULL),\n  (2, 'Bob', 1),\n  (3, 'Alice', 2),\n  (4, 'Carol', 3);"
+      }
+    ],
+    "trap": {
+      "sql": "WITH level0 AS (\n  SELECT id, name, name AS path FROM employees WHERE manager_id IS NULL\n),\nlevel1 AS (\n  SELECT e.id, e.name, l.path || ' > ' || e.name AS path\n  FROM employees e JOIN level0 l ON e.manager_id = l.id\n),\nlevel2 AS (\n  SELECT e.id, e.name, l.path || ' > ' || e.name AS path\n  FROM employees e JOIN level1 l ON e.manager_id = l.id\n),\nlevel3 AS (\n  SELECT e.id, e.name, l.path || ' > ' || e.name AS path\n  FROM employees e JOIN level2 l ON e.manager_id = l.id\n),\nall_levels AS (\n  SELECT id, name, path FROM level0\n  UNION ALL SELECT id, name, path FROM level1\n  UNION ALL SELECT id, name, path FROM level2\n  UNION ALL SELECT id, name, path FROM level3\n)\nSELECT name, path FROM all_levels ORDER BY path;",
+      "note": "Hardcodes only 4 levels of depth using non-recursive CTEs; matches the example (max depth 4) but misses level-5 and level-6 employees in the deep chain edge case."
+    }
+  },
+  "case-insensitive-name-sort": {
+    "tests": [
+      {
+        "name": "ROWID differs from id (exposes ROWID trap)",
+        "setupSql": "CREATE TABLE people (id INTEGER, name TEXT);\nINSERT INTO people (id, name) VALUES\n  (5, 'Amy'),\n  (1, 'amy'),\n  (10, 'Bob'),\n  (3, 'bob'),\n  (7, 'cara');"
+      },
+      {
+        "name": "All same NOCASE name, id tiebreak decides order",
+        "setupSql": "CREATE TABLE people (id INTEGER, name TEXT);\nINSERT INTO people (id, name) VALUES\n  (3, 'ALICE'),\n  (1, 'alice'),\n  (4, 'Alice'),\n  (2, 'aLiCe');"
+      },
+      {
+        "name": "Fully uppercase names interleaved with lowercase",
+        "setupSql": "CREATE TABLE people (id INTEGER, name TEXT);\nINSERT INTO people (id, name) VALUES\n  (1, 'ZARA'),\n  (2, 'anna'),\n  (3, 'MARK'),\n  (4, 'john'),\n  (5, 'ANNA'),\n  (6, 'mark');"
+      },
+      {
+        "name": "Single row",
+        "setupSql": "CREATE TABLE people (id INTEGER, name TEXT);\nINSERT INTO people (id, name) VALUES\n  (1, 'Alice');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT id, name\nFROM people\nORDER BY name COLLATE NOCASE, ROWID;",
+      "note": "Uses ROWID as tiebreak instead of id — matches when rows are inserted in id order but breaks when id values are not sequential or are inserted out of order."
+    }
+  },
+  "case-insensitive-search": {
+    "tests": [
+      {
+        "name": "All UPPER-case PRO",
+        "setupSql": "CREATE TABLE products (id INTEGER, name TEXT);\nINSERT INTO products (id, name) VALUES\n  (1, 'IPHONE PRO MAX'),\n  (2, 'BUDGET PHONE'),\n  (3, 'PROBOOK LAPTOP'),\n  (4, 'STUDIO DISPLAY'),\n  (5, 'MACBOOK AIR');"
+      },
+      {
+        "name": "Mixed unusual casing",
+        "setupSql": "CREATE TABLE products (id INTEGER, name TEXT);\nINSERT INTO products (id, name) VALUES\n  (1, 'pRoduct X'),\n  (2, 'Tablet Lite'),\n  (3, 'PrO Wireless'),\n  (4, 'Charger'),\n  (5, 'Speaker');"
+      },
+      {
+        "name": "No matches",
+        "setupSql": "CREATE TABLE products (id INTEGER, name TEXT);\nINSERT INTO products (id, name) VALUES\n  (1, 'Budget Phone'),\n  (2, 'Studio Display'),\n  (3, 'MacBook Air'),\n  (4, 'Magic Mouse'),\n  (5, 'USB Hub');"
+      },
+      {
+        "name": "Extra product contains apple — trap exposure",
+        "setupSql": "CREATE TABLE products (id INTEGER, name TEXT);\nINSERT INTO products (id, name) VALUES\n  (1, 'iPhone PRO'),\n  (2, 'Apple Watch'),\n  (3, 'ProBook Laptop'),\n  (4, 'Studio Display'),\n  (5, 'AirPods pro');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT id, name\nFROM products\nWHERE lower(name) LIKE '%pro%' OR lower(name) LIKE '%apple%'\nORDER BY id;",
+      "note": "Adds an extra OR condition for 'apple'; matches oracle on the example (no apple products) but returns extra rows on the trap-exposure edge case that includes 'Apple Watch'."
+    }
+  },
+  "category-revenue-leaders": {
+    "tests": [
+      {
+        "name": "Exact 50% boundary",
+        "setupSql": "CREATE TABLE sales (product TEXT, category TEXT, revenue REAL);\nINSERT INTO sales (product, category, revenue) VALUES\n  ('Apple', 'Fruit', 100),\n  ('Banana', 'Fruit', 100),\n  ('Carrot', 'Veggie', 300),\n  ('Daikon', 'Veggie', 100);"
+      },
+      {
+        "name": "Single-product category always qualifies",
+        "setupSql": "CREATE TABLE sales (product TEXT, category TEXT, revenue REAL);\nINSERT INTO sales (product, category, revenue) VALUES\n  ('Lone', 'Solo', 999),\n  ('Partner1', 'Duo', 400),\n  ('Partner2', 'Duo', 300);"
+      },
+      {
+        "name": "No leaders — all products below 50%",
+        "setupSql": "CREATE TABLE sales (product TEXT, category TEXT, revenue REAL);\nINSERT INTO sales (product, category, revenue) VALUES\n  ('P1', 'X', 100),\n  ('P2', 'X', 110),\n  ('P3', 'X', 120),\n  ('P4', 'X', 130);"
+      },
+      {
+        "name": "Multiple products each at exactly 50%",
+        "setupSql": "CREATE TABLE sales (product TEXT, category TEXT, revenue REAL);\nINSERT INTO sales (product, category, revenue) VALUES\n  ('Left', 'Split', 200),\n  ('Right', 'Split', 200),\n  ('Minority', 'Other', 10),\n  ('Majority', 'Other', 90);"
+      }
+    ],
+    "trap": {
+      "sql": "WITH cat AS (\n  SELECT category, SUM(revenue) AS tot FROM sales GROUP BY category\n),\nprod AS (\n  SELECT product, category, SUM(revenue) AS rev FROM sales GROUP BY product, category\n)\nSELECT p.product, p.rev\nFROM prod p\nJOIN cat c ON p.category = c.category\nWHERE p.rev > 0.5 * c.tot\nORDER BY p.product;",
+      "note": "Uses strict > instead of >= so products with exactly 50% of category revenue are wrongly excluded"
+    }
+  },
+  "churned-customers-except": {
+    "tests": [
+      {
+        "name": "All customers churned",
+        "setupSql": "CREATE TABLE last_year (customer TEXT);\nINSERT INTO last_year (customer) VALUES\n  ('Alice'), ('Bob'), ('Carol');\n\nCREATE TABLE this_year (customer TEXT);\nINSERT INTO this_year (customer) VALUES\n  ('Dave'), ('Eve');"
+      },
+      {
+        "name": "No customers churned",
+        "setupSql": "CREATE TABLE last_year (customer TEXT);\nINSERT INTO last_year (customer) VALUES\n  ('Alice'), ('Bob');\n\nCREATE TABLE this_year (customer TEXT);\nINSERT INTO this_year (customer) VALUES\n  ('Alice'), ('Bob'), ('Carol');"
+      },
+      {
+        "name": "Heavy duplicates in last_year deduped",
+        "setupSql": "CREATE TABLE last_year (customer TEXT);\nINSERT INTO last_year (customer) VALUES\n  ('Zara'), ('Zara'), ('Zara'), ('Max'), ('Max'), ('Sam');\n\nCREATE TABLE this_year (customer TEXT);\nINSERT INTO this_year (customer) VALUES\n  ('Zara'), ('Zara');"
+      },
+      {
+        "name": "NULL in this_year does not block non-NULL churned customers",
+        "setupSql": "CREATE TABLE last_year (customer TEXT);\nINSERT INTO last_year (customer) VALUES\n  ('Ana'), ('Bo');\n\nCREATE TABLE this_year (customer TEXT);\nINSERT INTO this_year (customer) VALUES\n  ('Ana'), (NULL);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT l.customer\nFROM last_year l\nLEFT JOIN this_year t ON l.customer = t.customer\nWHERE t.customer IS NULL\nORDER BY l.customer;",
+      "note": "LEFT JOIN without DISTINCT returns one row per unmatched left row, so duplicates in last_year produce duplicate output rows instead of being deduplicated like EXCEPT does."
+    }
+  },
+  "coalesce-default-values": {
+    "tests": [
+      {
+        "name": "All nicknames present",
+        "setupSql": "CREATE TABLE users (id INTEGER, name TEXT, nickname TEXT);\nINSERT INTO users (id, name, nickname) VALUES\n  (1, 'Alice', 'Ali'),\n  (2, 'Bob', 'Bobby'),\n  (3, 'Carol', 'CC');"
+      },
+      {
+        "name": "All nicknames NULL",
+        "setupSql": "CREATE TABLE users (id INTEGER, name TEXT, nickname TEXT);\nINSERT INTO users (id, name, nickname) VALUES\n  (1, 'Alice', NULL),\n  (2, 'Bob', NULL),\n  (3, 'Carol', NULL);"
+      },
+      {
+        "name": "NULL name and NULL nickname falls back to anonymous",
+        "setupSql": "CREATE TABLE users (id INTEGER, name TEXT, nickname TEXT);\nINSERT INTO users (id, name, nickname) VALUES\n  (1, 'Alice', 'Ali'),\n  (2, NULL, NULL),\n  (3, 'Carol', 'CC');"
+      },
+      {
+        "name": "Single row with NULL nickname",
+        "setupSql": "CREATE TABLE users (id INTEGER, name TEXT, nickname TEXT);\nINSERT INTO users (id, name, nickname) VALUES\n  (1, 'Zara', NULL);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT id, name,\n       IFNULL(nickname, name) AS nickname\nFROM users\nORDER BY id;",
+      "note": "Uses IFNULL(nickname, name) which returns NULL instead of 'anonymous' when both nickname and name are NULL — matches the example but fails on the edge case with a NULL name."
+    }
+  },
+  "consecutive-login-streaks": {
+    "tests": [
+      {
+        "name": "Single login — streak of one",
+        "setupSql": "CREATE TABLE logins (login_date TEXT);\nINSERT INTO logins (login_date) VALUES\n  ('2024-01-15');"
+      },
+      {
+        "name": "All consecutive — one big streak",
+        "setupSql": "CREATE TABLE logins (login_date TEXT);\nINSERT INTO logins (login_date) VALUES\n  ('2024-03-01'),\n  ('2024-03-02'),\n  ('2024-03-03'),\n  ('2024-03-04'),\n  ('2024-03-05');"
+      },
+      {
+        "name": "All isolated — every streak length 1",
+        "setupSql": "CREATE TABLE logins (login_date TEXT);\nINSERT INTO logins (login_date) VALUES\n  ('2024-06-01'),\n  ('2024-06-03'),\n  ('2024-06-05'),\n  ('2024-06-07');"
+      },
+      {
+        "name": "Duplicate login dates — exposes DENSE_RANK trap",
+        "setupSql": "CREATE TABLE logins (login_date TEXT);\nINSERT INTO logins (login_date) VALUES\n  ('2024-07-01'),\n  ('2024-07-01'),\n  ('2024-07-02'),\n  ('2024-07-03'),\n  ('2024-07-05');"
+      }
+    ],
+    "trap": {
+      "sql": "WITH numbered AS (\n  SELECT login_date,\n         DENSE_RANK() OVER (ORDER BY login_date) AS rn\n  FROM logins\n),\ngrouped AS (\n  SELECT login_date,\n         date(login_date, '-' || rn || ' days') AS grp\n  FROM numbered\n)\nSELECT MIN(login_date) AS start_date,\n       MAX(login_date) AS end_date,\n       COUNT(*)        AS days\nFROM grouped\nGROUP BY grp\nORDER BY start_date;",
+      "note": "Uses DENSE_RANK() instead of ROW_NUMBER() — assigns the same rank to duplicate dates, so the row-number shift produces wrong grouping keys when duplicate login_dates exist, giving inflated `days` counts."
+    }
+  },
+  "count-commas": {
+    "tests": [
+      {
+        "name": "Single item per row",
+        "setupSql": "CREATE TABLE rows_tags (id INTEGER, tags TEXT);\nINSERT INTO rows_tags (id, tags) VALUES\n  (1, 'alpha'),\n  (2, 'beta'),\n  (3, 'gamma'),\n  (4, 'delta');"
+      },
+      {
+        "name": "High comma count",
+        "setupSql": "CREATE TABLE rows_tags (id INTEGER, tags TEXT);\nINSERT INTO rows_tags (id, tags) VALUES\n  (1, 'a,b,c,d,e,f,g,h,i,j'),\n  (2, 'x,y,z'),\n  (3, 'one,two,three,four,five,six,seven,eight,nine,ten,eleven,twelve'),\n  (4, 'solo');"
+      },
+      {
+        "name": "Mixed single and multi with gaps in IDs",
+        "setupSql": "CREATE TABLE rows_tags (id INTEGER, tags TEXT);\nINSERT INTO rows_tags (id, tags) VALUES\n  (10, 'only'),\n  (20, 'first,second'),\n  (30, 'x,y,z,w'),\n  (40, 'just');"
+      },
+      {
+        "name": "ID order differs from item_count order",
+        "setupSql": "CREATE TABLE rows_tags (id INTEGER, tags TEXT);\nINSERT INTO rows_tags (id, tags) VALUES\n  (1, 'a,b,c,d,e,f'),\n  (2, 'x,y,z'),\n  (3, 'a,b,c,d,e,f,g,h,i,j'),\n  (4, 'solo'),\n  (5, 'p,q');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT id, tags,\n       length(tags) - length(replace(tags, ',', '')) + 1 AS item_count\nFROM rows_tags\nORDER BY item_count;",
+      "note": "Orders by item_count instead of id; on the example the two orderings coincidentally match (item_count increases with id), but on the 'ID order differs from item_count order' dataset the rows come out in a different sequence."
+    }
+  },
+  "count-star-vs-count-col": {
+    "tests": [
+      {
+        "name": "All NULLs",
+        "setupSql": "CREATE TABLE reviews (id INTEGER, score INTEGER);\nINSERT INTO reviews (id, score) VALUES\n  (1, NULL),\n  (2, NULL),\n  (3, NULL);"
+      },
+      {
+        "name": "No NULLs",
+        "setupSql": "CREATE TABLE reviews (id INTEGER, score INTEGER);\nINSERT INTO reviews (id, score) VALUES\n  (1, 4),\n  (2, 2),\n  (3, 6),\n  (4, 8);"
+      },
+      {
+        "name": "Single non-NULL among many NULLs",
+        "setupSql": "CREATE TABLE reviews (id INTEGER, score INTEGER);\nINSERT INTO reviews (id, score) VALUES\n  (1, NULL),\n  (2, NULL),\n  (3, 7),\n  (4, NULL),\n  (5, NULL);"
+      },
+      {
+        "name": "Non-terminating AVG",
+        "setupSql": "CREATE TABLE reviews (id INTEGER, score INTEGER);\nINSERT INTO reviews (id, score) VALUES\n  (1, 1),\n  (2, NULL),\n  (3, 1),\n  (4, NULL),\n  (5, 2);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT COUNT(*) AS total_rows,\n       COUNT(score) AS rated_rows,\n       AVG(score) AS avg_score\nFROM reviews;",
+      "note": "Omits ROUND: avg_score is returned as a raw float; matches the example because 14/4=3.5 is exact, but fails on the non-terminating AVG edge case where AVG(1,1,2)=1.3333... instead of the correct ROUND(1.333...,2)=1.33."
+    }
+  },
+  "coworker-pairs-in-same-department": {
+    "tests": [
+      {
+        "name": "All in one department",
+        "setupSql": "CREATE TABLE employees (id INTEGER, name TEXT, dept TEXT);\nINSERT INTO employees VALUES\n  (1, 'Alice', 'Eng'),\n  (2, 'Bob', 'Eng'),\n  (3, 'Carol', 'Eng'),\n  (4, 'Dave', 'Eng');"
+      },
+      {
+        "name": "All singletons, empty result",
+        "setupSql": "CREATE TABLE employees (id INTEGER, name TEXT, dept TEXT);\nINSERT INTO employees VALUES\n  (1, 'Alice', 'Finance'),\n  (2, 'Bob', 'HR'),\n  (3, 'Carol', 'Legal'),\n  (4, 'Dave', 'Sales');"
+      },
+      {
+        "name": "Two-person departments only",
+        "setupSql": "CREATE TABLE employees (id INTEGER, name TEXT, dept TEXT);\nINSERT INTO employees VALUES\n  (1, 'Alice', 'Eng'),\n  (2, 'Bob', 'Eng'),\n  (3, 'Carol', 'Sales'),\n  (4, 'Dave', 'Sales'),\n  (5, 'Eve', 'HR'),\n  (6, 'Frank', 'HR');"
+      },
+      {
+        "name": "Two-char dept name with pairs",
+        "setupSql": "CREATE TABLE employees (id INTEGER, name TEXT, dept TEXT);\nINSERT INTO employees VALUES\n  (1, 'Amy', 'HR'),\n  (2, 'Ben', 'HR'),\n  (3, 'Cara', 'HR'),\n  (4, 'Dan', 'Eng'),\n  (5, 'Eve', 'Sales');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT a.name AS employee_a, b.name AS employee_b, a.dept AS dept\nFROM employees a\nJOIN employees b ON a.dept = b.dept AND a.name < b.name\nWHERE length(a.dept) > 2\nORDER BY dept, employee_a, employee_b;",
+      "note": "Adds a spurious WHERE length(dept) > 2 filter; on the example the only short-dept name (HR) has no pairs anyway so the result matches, but fails on the 'Two-char dept name with pairs' edge case where HR employees should produce pairs."
+    }
+  },
+  "custom-priority-sort": {
+    "tests": [
+      {
+        "name": "Single priority group",
+        "setupSql": "CREATE TABLE tasks (title TEXT, priority TEXT, created TEXT);\nINSERT INTO tasks (title, priority, created) VALUES\n  ('Task A', 'high', '2024-01-03'),\n  ('Task B', 'high', '2024-01-01'),\n  ('Task C', 'high', '2024-01-02');"
+      },
+      {
+        "name": "Unknown priority via ELSE branch",
+        "setupSql": "CREATE TABLE tasks (title TEXT, priority TEXT, created TEXT);\nINSERT INTO tasks (title, priority, created) VALUES\n  ('Alpha',   'high',    '2024-03-01'),\n  ('Beta',    'urgent',  '2024-03-02'),\n  ('Gamma',   'medium',  '2024-03-01'),\n  ('Delta',   'low',     '2024-03-01'),\n  ('Epsilon', 'backlog', '2024-03-03');"
+      },
+      {
+        "name": "No high priority tasks",
+        "setupSql": "CREATE TABLE tasks (title TEXT, priority TEXT, created TEXT);\nINSERT INTO tasks (title, priority, created) VALUES\n  ('First',  'medium', '2024-05-02'),\n  ('Second', 'low',    '2024-05-01'),\n  ('Third',  'medium', '2024-05-01'),\n  ('Fourth', 'low',    '2024-05-03');"
+      },
+      {
+        "name": "Same created date across different priorities",
+        "setupSql": "CREATE TABLE tasks (title TEXT, priority TEXT, created TEXT);\nINSERT INTO tasks (title, priority, created) VALUES\n  ('Task X', 'low',    '2024-07-01'),\n  ('Task Y', 'high',   '2024-07-01'),\n  ('Task Z', 'medium', '2024-07-01'),\n  ('Task W', 'high',   '2024-07-02'),\n  ('Task V', 'low',    '2024-07-03');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT title, priority\nFROM tasks\nORDER BY CASE priority\n           WHEN 'high'   THEN 1\n           WHEN 'medium' THEN 2\n           WHEN 'low'    THEN 3\n         END,\n         created;",
+      "note": "Enumerates 'low' explicitly instead of using ELSE, so unknown priorities yield NULL which SQLite sorts FIRST (before high=1), placing them at the top instead of the bottom."
+    }
+  },
+  "customers-on-both-channels-intersect": {
+    "tests": [
+      {
+        "name": "No overlap — empty result",
+        "setupSql": "CREATE TABLE online_buyers (customer TEXT);\nINSERT INTO online_buyers (customer) VALUES\n  ('Ada'), ('Bea'), ('Cleo');\n\nCREATE TABLE retail_buyers (customer TEXT);\nINSERT INTO retail_buyers (customer) VALUES\n  ('Dev'), ('Eve'), ('Finn');"
+      },
+      {
+        "name": "Full overlap — all customers on both channels",
+        "setupSql": "CREATE TABLE online_buyers (customer TEXT);\nINSERT INTO online_buyers (customer) VALUES\n  ('Ada'), ('Bea'), ('Cleo');\n\nCREATE TABLE retail_buyers (customer TEXT);\nINSERT INTO retail_buyers (customer) VALUES\n  ('Ada'), ('Bea'), ('Cleo');"
+      },
+      {
+        "name": "Duplicates in retail_buyers — trap exposure",
+        "setupSql": "CREATE TABLE online_buyers (customer TEXT);\nINSERT INTO online_buyers (customer) VALUES\n  ('Ada'), ('Bea'), ('Cleo');\n\nCREATE TABLE retail_buyers (customer TEXT);\nINSERT INTO retail_buyers (customer) VALUES\n  ('Bea'), ('Bea'), ('Cleo'), ('Cleo'), ('Dev');"
+      },
+      {
+        "name": "Single common customer with many duplicates in both tables",
+        "setupSql": "CREATE TABLE online_buyers (customer TEXT);\nINSERT INTO online_buyers (customer) VALUES\n  ('Zoe'), ('Zoe'), ('Zoe'), ('Ada');\n\nCREATE TABLE retail_buyers (customer TEXT);\nINSERT INTO retail_buyers (customer) VALUES\n  ('Zoe'), ('Zoe'), ('Bea'), ('Cleo');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT customer FROM retail_buyers WHERE customer IN (SELECT customer FROM online_buyers) ORDER BY customer;",
+      "note": "Queries retail_buyers without DISTINCT — returns duplicate rows when retail_buyers has repeated entries for the same customer, but the correct result should deduplicate."
+    }
+  },
+  "customers-who-placed-orders-semijoin": {
+    "tests": [
+      {
+        "name": "All customers have orders",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers VALUES\n  (1, 'Alice'), (2, 'Bob'), (3, 'Carol');\nCREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER);\nINSERT INTO orders VALUES\n  (1, 1, 50), (2, 2, 30), (3, 3, 70), (4, 1, 20);"
+      },
+      {
+        "name": "No customers have orders",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers VALUES\n  (1, 'Alice'), (2, 'Bob'), (3, 'Carol');\nCREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER);\nINSERT INTO orders VALUES\n  (1, 99, 50), (2, 100, 30);"
+      },
+      {
+        "name": "Duplicate customer names both with orders",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers VALUES\n  (1, 'Alex'), (2, 'Alex'), (3, 'Beth'), (4, 'Carl');\nCREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER);\nINSERT INTO orders VALUES\n  (1, 1, 100), (2, 2, 200), (3, 4, 50);"
+      },
+      {
+        "name": "NULL customer_id in orders",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers VALUES\n  (1, 'Zara'), (2, 'Yuki'), (3, 'Xena');\nCREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER);\nINSERT INTO orders VALUES\n  (1, 1, 80), (2, NULL, 60), (3, 3, 40);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT c.name\nFROM customers c\nJOIN orders o ON c.id = o.customer_id\nGROUP BY c.name\nORDER BY c.name;",
+      "note": "Groups by name instead of customer id — two distinct customers sharing the same name who both have orders are collapsed into one row, undercounting results."
+    }
+  },
+  "customers-with-big-orders-in-vs-exists": {
+    "tests": [
+      {
+        "name": "Exactly at threshold (boundary 100 excluded)",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers (id, name) VALUES\n  (1, 'Alice'),\n  (2, 'Bob'),\n  (3, 'Carol');\n\nCREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER);\nINSERT INTO orders (id, customer_id, amount) VALUES\n  (1, 1, 100),\n  (2, 2, 99),\n  (3, 3, 101);"
+      },
+      {
+        "name": "No orders exceed 100 (empty result)",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers (id, name) VALUES\n  (1, 'Alice'),\n  (2, 'Bob');\n\nCREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER);\nINSERT INTO orders (id, customer_id, amount) VALUES\n  (1, 1, 50),\n  (2, 1, 100),\n  (3, 2, 80);"
+      },
+      {
+        "name": "Customer with no orders at all",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers (id, name) VALUES\n  (1, 'Alice'),\n  (2, 'Bob'),\n  (3, 'Carol');\n\nCREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER);\nINSERT INTO orders (id, customer_id, amount) VALUES\n  (1, 1, 200),\n  (2, 2, 50);"
+      },
+      {
+        "name": "NULL customer_id in orders (NOT IN trap)",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers (id, name) VALUES\n  (1, 'Alice'),\n  (2, 'Bob'),\n  (3, 'Carol');\n\nCREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER);\nINSERT INTO orders (id, customer_id, amount) VALUES\n  (1, 1, 200),\n  (2, 2, 50),\n  (3, NULL, 300);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT c.name AS name\nFROM customers c\nWHERE c.id IN (\n  SELECT o.customer_id\n  FROM orders o\n  WHERE o.amount >= 100\n)\nORDER BY c.name;",
+      "note": "Uses >= 100 instead of > 100, so it incorrectly includes customers whose only big order is exactly 100 (hits the boundary edge case)."
+    }
+  },
+  "customers-with-no-orders": {
+    "tests": [
+      {
+        "name": "Duplicate customer names — trap joins on name not id",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers (id, name) VALUES\n  (1, 'Alex'), (2, 'Alex'), (3, 'Beth');\n\nCREATE TABLE orders (id INTEGER, customer_id INTEGER);\nINSERT INTO orders (id, customer_id) VALUES\n  (1, 1);"
+      },
+      {
+        "name": "All customers have orders (empty result)",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers (id, name) VALUES\n  (1, 'Anna'), (2, 'Ben');\n\nCREATE TABLE orders (id INTEGER, customer_id INTEGER);\nINSERT INTO orders (id, customer_id) VALUES\n  (1, 1), (2, 2);"
+      },
+      {
+        "name": "All customers have no orders (everyone returned)",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers (id, name) VALUES\n  (1, 'Dave'), (2, 'Eve'), (3, 'Frank');\n\nCREATE TABLE orders (id INTEGER, customer_id INTEGER);"
+      },
+      {
+        "name": "Orders reference non-existent customer id (orphan rows)",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers (id, name) VALUES\n  (1, 'Lena'), (2, 'Moe'), (3, 'Nina');\n\nCREATE TABLE orders (id INTEGER, customer_id INTEGER);\nINSERT INTO orders (id, customer_id) VALUES\n  (1, 1), (2, 99), (3, 100);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT name\nFROM customers\nWHERE name NOT IN (\n  SELECT c2.name FROM customers c2\n  JOIN orders o ON o.customer_id = c2.id\n)\nORDER BY name;",
+      "note": "Joins on customer name instead of customer id — works when all names are unique but incorrectly excludes a customer who shares a name with someone who has placed an order, even though they themselves have not."
+    }
+  },
+  "customers-without-orders-antijoin": {
+    "tests": [
+      {
+        "name": "All customers have orders",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers VALUES\n  (1, 'Ava'), (2, 'Ben'), (3, 'Cara');\nCREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER);\nINSERT INTO orders VALUES\n  (101, 1, 40), (102, 2, 25), (103, 3, 90);"
+      },
+      {
+        "name": "No orders at all",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers VALUES\n  (1, 'Alice'), (2, 'Bob'), (3, 'Zoe');\nCREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER);"
+      },
+      {
+        "name": "NULL customer_id in orders",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers VALUES\n  (1, 'Ava'), (2, 'Ben'), (3, 'Cara');\nCREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER);\nINSERT INTO orders VALUES\n  (101, 1, 40), (102, NULL, 25);"
+      },
+      {
+        "name": "Single customer with no orders",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers VALUES\n  (1, 'Solo');\nCREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT c.name\nFROM customers c\nWHERE c.id NOT IN (SELECT customer_id FROM orders)\nORDER BY c.name;",
+      "note": "NOT IN with a subquery silently returns no rows when any customer_id in orders is NULL (3-valued logic: NULL comparison is UNKNOWN, so NOT IN short-circuits to false for every row)."
+    }
+  },
+  "daily-cumulative-sales-range-vs-rows": {
+    "tests": [
+      {
+        "name": "Single day, all rows same date",
+        "setupSql": "CREATE TABLE daily_sales (sale_date TEXT, amount INTEGER);\nINSERT INTO daily_sales (sale_date, amount) VALUES\n  ('2024-01-01', 5),\n  ('2024-01-01', 10),\n  ('2024-01-01', 15);"
+      },
+      {
+        "name": "Negative amounts (refunds) in running total",
+        "setupSql": "CREATE TABLE daily_sales (sale_date TEXT, amount INTEGER);\nINSERT INTO daily_sales (sale_date, amount) VALUES\n  ('2024-01-01', 100),\n  ('2024-01-01', -20),\n  ('2024-01-02', 50);"
+      },
+      {
+        "name": "Single row",
+        "setupSql": "CREATE TABLE daily_sales (sale_date TEXT, amount INTEGER);\nINSERT INTO daily_sales (sale_date, amount) VALUES\n  ('2024-03-15', 42);"
+      },
+      {
+        "name": "Multiple days, uniform amounts (all ties on amount)",
+        "setupSql": "CREATE TABLE daily_sales (sale_date TEXT, amount INTEGER);\nINSERT INTO daily_sales (sale_date, amount) VALUES\n  ('2024-05-01', 10),\n  ('2024-05-01', 10),\n  ('2024-05-02', 10),\n  ('2024-05-02', 10);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT\n  d.sale_date,\n  d.amount,\n  (SELECT SUM(x.amount) FROM daily_sales x WHERE x.sale_date <= d.sale_date AND x.amount >= 0) AS cume_total\nFROM daily_sales d\nORDER BY d.sale_date, d.amount;",
+      "note": "Filters out negative amounts (AND x.amount >= 0), which silently excludes refunds/returns — matches example where all amounts are positive, but gives wrong cumulative totals when negative amounts are present."
+    }
+  },
+  "days-between-two-dates": {
+    "tests": [
+      {
+        "name": "Same-day cancellation (zero days)",
+        "setupSql": "CREATE TABLE subscriptions (id INTEGER, signup TEXT, cancelled TEXT);\nINSERT INTO subscriptions (id, signup, cancelled) VALUES\n  (1, '2024-05-10', '2024-05-10'),\n  (2, '2024-07-01', '2024-07-01'),\n  (3, '2024-09-15', '2024-09-15');"
+      },
+      {
+        "name": "Single row subscription",
+        "setupSql": "CREATE TABLE subscriptions (id INTEGER, signup TEXT, cancelled TEXT);\nINSERT INTO subscriptions (id, signup, cancelled) VALUES\n  (1, '2023-01-01', '2023-12-31');"
+      },
+      {
+        "name": "Leap year Feb boundary",
+        "setupSql": "CREATE TABLE subscriptions (id INTEGER, signup TEXT, cancelled TEXT);\nINSERT INTO subscriptions (id, signup, cancelled) VALUES\n  (1, '2024-02-28', '2024-03-01'),\n  (2, '2023-02-28', '2023-03-01'),\n  (3, '2024-02-01', '2024-03-01');"
+      },
+      {
+        "name": "Negative days_active (cancelled before signup)",
+        "setupSql": "CREATE TABLE subscriptions (id INTEGER, signup TEXT, cancelled TEXT);\nINSERT INTO subscriptions (id, signup, cancelled) VALUES\n  (1, '2024-06-15', '2024-06-01'),\n  (2, '2024-03-10', '2024-03-05'),\n  (3, '2024-01-20', '2024-01-10');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT id, signup, cancelled,\n       CAST(ABS(julianday(cancelled) - julianday(signup)) AS INTEGER) AS days_active\nFROM subscriptions\nORDER BY id;",
+      "note": "Uses ABS() on the julianday difference, which gives positive values even when cancelled is before signup — matches the oracle on normal data but produces wrong (positive) results when days_active should be negative."
+    }
+  },
+  "dedupe-latest-contact": {
+    "tests": [
+      {
+        "name": "Tie on updated_at — id tie-breaker required",
+        "setupSql": "CREATE TABLE contacts (id INTEGER, email TEXT, name TEXT, updated_at TEXT);\nINSERT INTO contacts (id, email, name, updated_at) VALUES\n  (10, 'p@x.com', 'Pat',   '2024-05-01'),\n  (11, 'p@x.com', 'Patty', '2024-05-01'),\n  (20, 'q@x.com', 'Quinn', '2024-06-01'),\n  (21, 'q@x.com', 'Quincy','2024-06-01'),\n  (22, 'q@x.com', 'Qin',   '2024-04-01');"
+      },
+      {
+        "name": "Single row per email — no deduplication needed",
+        "setupSql": "CREATE TABLE contacts (id INTEGER, email TEXT, name TEXT, updated_at TEXT);\nINSERT INTO contacts (id, email, name, updated_at) VALUES\n  (1, 'solo@x.com',  'Solo',  '2024-01-01'),\n  (2, 'alpha@x.com', 'Alpha', '2024-03-15'),\n  (3, 'beta@x.com',  'Beta',  '2024-02-28');"
+      },
+      {
+        "name": "All rows for one email share the same timestamp",
+        "setupSql": "CREATE TABLE contacts (id INTEGER, email TEXT, name TEXT, updated_at TEXT);\nINSERT INTO contacts (id, email, name, updated_at) VALUES\n  (1, 'same@x.com', 'First',  '2024-07-04'),\n  (2, 'same@x.com', 'Second', '2024-07-04'),\n  (3, 'same@x.com', 'Third',  '2024-07-04'),\n  (4, 'other@x.com','Other',  '2024-01-01');"
+      },
+      {
+        "name": "Newer timestamp has a lower id than older timestamp",
+        "setupSql": "CREATE TABLE contacts (id INTEGER, email TEXT, name TEXT, updated_at TEXT);\nINSERT INTO contacts (id, email, name, updated_at) VALUES\n  (5, 'x@x.com', 'Old X',  '2023-01-01'),\n  (3, 'x@x.com', 'New X',  '2024-06-01'),\n  (8, 'y@x.com', 'Old Y',  '2022-05-01'),\n  (6, 'y@x.com', 'Mid Y',  '2023-05-01'),\n  (4, 'y@x.com', 'New Y',  '2024-05-01');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT c.email, c.name, c.updated_at\nFROM contacts c\nINNER JOIN (\n  SELECT email, MAX(updated_at) AS max_ts, MAX(id) AS max_id\n  FROM contacts\n  GROUP BY email\n) latest ON c.email = latest.email AND c.id = latest.max_id\nORDER BY c.email;",
+      "note": "Selects the row with MAX(id) overall per email, but the true rule is MAX(updated_at) first then MAX(id) — fails when a newer timestamp belongs to a lower id than the group's maximum id."
+    }
+  },
+  "department-payroll-over-join": {
+    "tests": [
+      {
+        "name": "Boundary exactly 100 excluded",
+        "setupSql": "CREATE TABLE departments (id INTEGER, name TEXT);\nINSERT INTO departments (id, name) VALUES\n  (1, 'Engineering'),\n  (2, 'Sales'),\n  (3, 'Legal');\n\nCREATE TABLE employees (id INTEGER, dept_id INTEGER, salary INTEGER);\nINSERT INTO employees (id, dept_id, salary) VALUES\n  (1, 1, 60),\n  (2, 1, 40),\n  (3, 2, 80),\n  (4, 2, 30),\n  (5, 3, 50),\n  (6, 3, 30);"
+      },
+      {
+        "name": "Tie in total_salary resolved by department name",
+        "setupSql": "CREATE TABLE departments (id INTEGER, name TEXT);\nINSERT INTO departments (id, name) VALUES\n  (1, 'Engineering'),\n  (2, 'Marketing'),\n  (3, 'Sales'),\n  (4, 'HR');\n\nCREATE TABLE employees (id INTEGER, dept_id INTEGER, salary INTEGER);\nINSERT INTO employees (id, dept_id, salary) VALUES\n  (1, 1, 70),\n  (2, 1, 50),\n  (3, 2, 80),\n  (4, 2, 40),\n  (5, 3, 90),\n  (6, 3, 30),\n  (7, 4, 60);"
+      },
+      {
+        "name": "Department with no employees excluded",
+        "setupSql": "CREATE TABLE departments (id INTEGER, name TEXT);\nINSERT INTO departments (id, name) VALUES\n  (1, 'Engineering'),\n  (2, 'Sales'),\n  (3, 'Legal');\n\nCREATE TABLE employees (id INTEGER, dept_id INTEGER, salary INTEGER);\nINSERT INTO employees (id, dept_id, salary) VALUES\n  (1, 1, 80),\n  (2, 1, 60),\n  (3, 2, 70),\n  (4, 2, 50);"
+      },
+      {
+        "name": "Single high-salary employee per qualifying department",
+        "setupSql": "CREATE TABLE departments (id INTEGER, name TEXT);\nINSERT INTO departments (id, name) VALUES\n  (1, 'Engineering'),\n  (2, 'Sales'),\n  (3, 'Legal');\n\nCREATE TABLE employees (id INTEGER, dept_id INTEGER, salary INTEGER);\nINSERT INTO employees (id, dept_id, salary) VALUES\n  (1, 1, 150),\n  (2, 2, 50),\n  (3, 3, 200);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT d.name AS department,\n       COUNT(*)      AS headcount,\n       SUM(e.salary) AS total_salary\nFROM departments d\nJOIN employees e ON e.dept_id = d.id\nGROUP BY d.name\nHAVING SUM(e.salary) >= 100\nORDER BY total_salary DESC, department;",
+      "note": "Uses >= 100 instead of > 100, so it includes departments whose total salary equals exactly 100, incorrectly admitting them."
+    }
+  },
+  "departments-avg-salary-having-subquery": {
+    "tests": [
+      {
+        "name": "Department exactly at company average excluded",
+        "setupSql": "CREATE TABLE employees (name TEXT, dept TEXT, salary INTEGER);\nINSERT INTO employees (name, dept, salary) VALUES\n  ('e1', 'Eng',   150),\n  ('e2', 'Eng',   150),\n  ('e3', 'Sales', 100),\n  ('e4', 'Sales', 100),\n  ('e5', 'HR',    200),\n  ('e6', 'HR',    200);"
+      },
+      {
+        "name": "Single-employee departments only",
+        "setupSql": "CREATE TABLE employees (name TEXT, dept TEXT, salary INTEGER);\nINSERT INTO employees (name, dept, salary) VALUES\n  ('e1', 'Eng',   200),\n  ('e2', 'Sales', 100),\n  ('e3', 'HR',    80),\n  ('e4', 'Ops',   60);"
+      },
+      {
+        "name": "Multiple departments tie on avg_salary — ordered by dept name",
+        "setupSql": "CREATE TABLE employees (name TEXT, dept TEXT, salary INTEGER);\nINSERT INTO employees (name, dept, salary) VALUES\n  ('e1', 'Alpha', 200),\n  ('e2', 'Beta',  200),\n  ('e3', 'Gamma', 200),\n  ('e4', 'Low1',  50),\n  ('e5', 'Low2',  50);"
+      },
+      {
+        "name": "Empty result — no department beats company average",
+        "setupSql": "CREATE TABLE employees (name TEXT, dept TEXT, salary INTEGER);\nINSERT INTO employees (name, dept, salary) VALUES\n  ('e1', 'Eng',   100),\n  ('e2', 'Eng',   100),\n  ('e3', 'Sales', 100),\n  ('e4', 'HR',    100);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT dept AS dept, ROUND(AVG(salary), 2) AS avg_salary\nFROM employees\nGROUP BY dept\nHAVING AVG(salary) >= (SELECT AVG(salary) FROM employees)\nORDER BY avg_salary DESC, dept;",
+      "note": "Uses >= instead of > in HAVING, incorrectly including departments whose average equals the company average."
+    }
+  },
+  "difference-from-subject-average": {
+    "tests": [
+      {
+        "name": "Single student per subject",
+        "setupSql": "CREATE TABLE scores (student TEXT, subject TEXT, score INTEGER);\nINSERT INTO scores (student, subject, score) VALUES\n  ('Alice', 'Math', 75),\n  ('Bob', 'Science', 88),\n  ('Carol', 'History', 92);"
+      },
+      {
+        "name": "Non-integer averages requiring rounding",
+        "setupSql": "CREATE TABLE scores (student TEXT, subject TEXT, score INTEGER);\nINSERT INTO scores (student, subject, score) VALUES\n  ('Alice', 'Math', 70),\n  ('Bob', 'Math', 80),\n  ('Carol', 'Math', 90),\n  ('Alice', 'Science', 55),\n  ('Bob', 'Science', 65),\n  ('Carol', 'Science', 75);"
+      },
+      {
+        "name": "All scores equal within a subject",
+        "setupSql": "CREATE TABLE scores (student TEXT, subject TEXT, score INTEGER);\nINSERT INTO scores (student, subject, score) VALUES\n  ('Alice', 'Math', 80),\n  ('Bob', 'Math', 80),\n  ('Carol', 'Math', 80),\n  ('Alice', 'Science', 70),\n  ('Bob', 'Science', 90);"
+      },
+      {
+        "name": "Unequal subject averages expose global-avg trap",
+        "setupSql": "CREATE TABLE scores (student TEXT, subject TEXT, score INTEGER);\nINSERT INTO scores (student, subject, score) VALUES\n  ('Alice', 'Math', 90),\n  ('Bob', 'Math', 100),\n  ('Carol', 'Science', 40),\n  ('Dave', 'Science', 50);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT student, subject, score,\n       ROUND(score - AVG(score) OVER (), 2) AS diff\nFROM scores\nORDER BY subject, student;",
+      "note": "Uses AVG(score) OVER () (global average) instead of AVG(score) OVER (PARTITION BY subject); coincidentally matches the example because both subjects have the same mean (80), but diverges when subject averages differ."
+    }
+  },
+  "distinct-products-per-store": {
+    "tests": [
+      {
+        "name": "NULL product ignored by COUNT(DISTINCT)",
+        "setupSql": "CREATE TABLE sales (store TEXT, product TEXT);\nINSERT INTO sales (store, product) VALUES\n  ('Alpha', 'Pen'),\n  ('Alpha', NULL),\n  ('Alpha', NULL),\n  ('Beta',  'Pen'),\n  ('Beta',  'Pad'),\n  ('Beta',  NULL),\n  ('Gamma', NULL);"
+      },
+      {
+        "name": "All duplicates no unique rows",
+        "setupSql": "CREATE TABLE sales (store TEXT, product TEXT);\nINSERT INTO sales (store, product) VALUES\n  ('A', 'X'),\n  ('A', 'X'),\n  ('A', 'X'),\n  ('B', 'Y'),\n  ('B', 'Y'),\n  ('C', 'Z'),\n  ('C', 'Z'),\n  ('C', 'Z');"
+      },
+      {
+        "name": "Tie broken by store name ascending",
+        "setupSql": "CREATE TABLE sales (store TEXT, product TEXT);\nINSERT INTO sales (store, product) VALUES\n  ('Zeta',  'Pen'),\n  ('Zeta',  'Pad'),\n  ('Alpha', 'Ink'),\n  ('Alpha', 'Mug'),\n  ('Omega', 'Box');"
+      },
+      {
+        "name": "Single store single product repeated",
+        "setupSql": "CREATE TABLE sales (store TEXT, product TEXT);\nINSERT INTO sales (store, product) VALUES\n  ('Solo', 'Widget'),\n  ('Solo', 'Widget'),\n  ('Solo', 'Widget');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT store, COUNT(DISTINCT product) AS distinct_products\nFROM sales\nGROUP BY store\nORDER BY distinct_products DESC, store DESC;",
+      "note": "Uses DESC instead of ASC for the store tiebreaker, so it matches the example (no ties) but returns Zeta before Alpha when both have 2 distinct products instead of Alpha first."
+    }
+  },
+  "email-domain-extract": {
+    "tests": [
+      {
+        "name": "Long local part with short domain",
+        "setupSql": "CREATE TABLE users (id INTEGER, email TEXT);\nINSERT INTO users (id, email) VALUES\n  (1, 'verylongusername@a.io'),\n  (2, 'x@b.co'),\n  (3, 'toolongname123@example.com');"
+      },
+      {
+        "name": "@ at varying positions including near start",
+        "setupSql": "CREATE TABLE users (id INTEGER, email TEXT);\nINSERT INTO users (id, email) VALUES\n  (1, 'a@one.com'),\n  (2, 'ab@two.net'),\n  (3, 'abc@three.org'),\n  (4, 'abcd@four.edu');"
+      },
+      {
+        "name": "Subdomain in domain part",
+        "setupSql": "CREATE TABLE users (id INTEGER, email TEXT);\nINSERT INTO users (id, email) VALUES\n  (1, 'user@mail.company.com'),\n  (2, 'admin@sub.domain.org'),\n  (3, 'test@deep.sub.domain.net');"
+      },
+      {
+        "name": "Domain chars overlap with local part chars",
+        "setupSql": "CREATE TABLE users (id INTEGER, email TEXT);\nINSERT INTO users (id, email) VALUES\n  (1, 'abc@abc.com'),\n  (2, 'cal@calc.org'),\n  (3, 'net@network.net');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT id, email,\n       ltrim(email, substr(email, 1, instr(email, '@'))) AS domain\nFROM users\nORDER BY id;",
+      "note": "Uses LTRIM to strip characters up to and including '@', but LTRIM strips any characters in the set — when local-part chars appear in the domain (e.g. 'abc@abc.com'), it over-strips, returning wrong domain."
+    }
+  },
+  "employee-and-their-manager": {
+    "tests": [
+      {
+        "name": "Self-managed employee",
+        "setupSql": "CREATE TABLE employees (id INTEGER, name TEXT, manager_id INTEGER);\nINSERT INTO employees VALUES\n  (1, 'Alice', NULL),\n  (2, 'Bob',   2),\n  (3, 'Carol', 1);"
+      },
+      {
+        "name": "Single employee-manager pair",
+        "setupSql": "CREATE TABLE employees (id INTEGER, name TEXT, manager_id INTEGER);\nINSERT INTO employees VALUES\n  (1, 'Zara', NULL),\n  (2, 'Yusuf', 1);"
+      },
+      {
+        "name": "Deep chain of managers",
+        "setupSql": "CREATE TABLE employees (id INTEGER, name TEXT, manager_id INTEGER);\nINSERT INTO employees VALUES\n  (1, 'Alpha', NULL),\n  (2, 'Beta',  1),\n  (3, 'Gamma', 2),\n  (4, 'Delta', 3);"
+      },
+      {
+        "name": "All employees have a manager (cycle)",
+        "setupSql": "CREATE TABLE employees (id INTEGER, name TEXT, manager_id INTEGER);\nINSERT INTO employees VALUES\n  (1, 'Pam', 2),\n  (2, 'Quinn', 1),\n  (3, 'Rex', 1);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT e.name AS employee, m.name AS manager\nFROM employees e\nJOIN employees m ON e.manager_id = m.id\nWHERE e.id != m.id\nORDER BY employee;",
+      "note": "Adds a redundant-looking `e.id != m.id` guard that silently drops any employee whose manager_id equals their own id (a self-managed employee), matching the example but failing when such a row exists."
+    }
+  },
+  "employee-hierarchy-levels": {
+    "tests": [
+      {
+        "name": "Single employee CEO only",
+        "setupSql": "CREATE TABLE employees (id INTEGER, name TEXT, manager_id INTEGER);\nINSERT INTO employees (id, name, manager_id) VALUES\n  (1, 'Solo', NULL);"
+      },
+      {
+        "name": "Deep linear chain five levels",
+        "setupSql": "CREATE TABLE employees (id INTEGER, name TEXT, manager_id INTEGER);\nINSERT INTO employees (id, name, manager_id) VALUES\n  (1, 'Alice', NULL),\n  (2, 'Bob', 1),\n  (3, 'Carol', 2),\n  (4, 'Dan', 3),\n  (5, 'Eve', 4);"
+      },
+      {
+        "name": "Flat org CEO with many direct reports",
+        "setupSql": "CREATE TABLE employees (id INTEGER, name TEXT, manager_id INTEGER);\nINSERT INTO employees (id, name, manager_id) VALUES\n  (1, 'Alice', NULL),\n  (2, 'Bob', 1),\n  (3, 'Carol', 1),\n  (4, 'Dan', 1),\n  (5, 'Eve', 1),\n  (6, 'Frank', 1);"
+      },
+      {
+        "name": "Three levels with sibling at level three",
+        "setupSql": "CREATE TABLE employees (id INTEGER, name TEXT, manager_id INTEGER);\nINSERT INTO employees (id, name, manager_id) VALUES\n  (1, 'Alice', NULL),\n  (2, 'Bob', 1),\n  (3, 'Carol', 1),\n  (4, 'Dan', 2),\n  (5, 'Eve', 3),\n  (6, 'Frank', 3);"
+      }
+    ],
+    "trap": {
+      "sql": "WITH roots AS (SELECT id, name, 1 AS level FROM employees WHERE manager_id IS NULL),\n     l2 AS (SELECT e.id, e.name, 2 AS level FROM employees e JOIN roots r ON e.manager_id = r.id),\n     l3 AS (SELECT e.id, e.name, 3 AS level FROM employees e JOIN l2 ON e.manager_id = l2.id),\n     l4 AS (SELECT e.id, e.name, 4 AS level FROM employees e JOIN l3 ON e.manager_id = l3.id)\nSELECT name, level FROM roots\nUNION ALL SELECT name, level FROM l2\nUNION ALL SELECT name, level FROM l3\nUNION ALL SELECT name, level FROM l4\nORDER BY level, name;",
+      "note": "Non-recursive fixed-depth UNION approach only handles up to 4 levels; fails for hierarchies deeper than 4 levels (e.g. 5-level chain)."
+    }
+  },
+  "events-per-month": {
+    "tests": [
+      {
+        "name": "Single event single month",
+        "setupSql": "CREATE TABLE events (id INTEGER, event_date TEXT);\nINSERT INTO events (id, event_date) VALUES\n  (1, '2024-06-15');"
+      },
+      {
+        "name": "Same month number different years",
+        "setupSql": "CREATE TABLE events (id INTEGER, event_date TEXT);\nINSERT INTO events (id, event_date) VALUES\n  (1, '2023-03-01'),\n  (2, '2023-03-20'),\n  (3, '2024-03-05'),\n  (4, '2024-03-22'),\n  (5, '2024-03-30');"
+      },
+      {
+        "name": "One event per month across many months",
+        "setupSql": "CREATE TABLE events (id INTEGER, event_date TEXT);\nINSERT INTO events (id, event_date) VALUES\n  (1, '2024-01-01'),\n  (2, '2024-02-14'),\n  (3, '2024-03-07'),\n  (4, '2024-04-22'),\n  (5, '2024-05-31'),\n  (6, '2024-06-10'),\n  (7, '2024-07-04');"
+      },
+      {
+        "name": "NULL event_date rows",
+        "setupSql": "CREATE TABLE events (id INTEGER, event_date TEXT);\nINSERT INTO events (id, event_date) VALUES\n  (1, '2024-02-10'),\n  (2, '2024-02-28'),\n  (3, '2024-05-15'),\n  (4, NULL),\n  (5, NULL);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT strftime('%Y-%m', event_date) AS ym,\n       COUNT(event_date) AS cnt\nFROM events\nGROUP BY strftime('%Y-%m', event_date)\nORDER BY ym;",
+      "note": "Uses COUNT(event_date) instead of COUNT(*); when event_date is NULL the NULL group has cnt=0 instead of the correct cnt=2, differing from the oracle on the NULL edge case."
+    }
+  },
+  "events-per-weekday": {
+    "tests": [
+      {
+        "name": "Single weekday only",
+        "setupSql": "CREATE TABLE events (id INTEGER, event_date TEXT);\nINSERT INTO events (id, event_date) VALUES\n  (1, '2024-06-12'),\n  (2, '2024-06-19'),\n  (3, '2024-06-26');"
+      },
+      {
+        "name": "Trap-buster: later weekday has earlier date",
+        "setupSql": "CREATE TABLE events (id INTEGER, event_date TEXT);\nINSERT INTO events (id, event_date) VALUES\n  (1, '2024-01-06'),\n  (2, '2024-01-13'),\n  (3, '2024-01-20'),\n  (4, '2024-06-09'),\n  (5, '2024-06-16'),\n  (6, '2024-06-23');"
+      },
+      {
+        "name": "All 7 weekdays present",
+        "setupSql": "CREATE TABLE events (id INTEGER, event_date TEXT);\nINSERT INTO events (id, event_date) VALUES\n  (1, '2024-06-09'),\n  (2, '2024-06-10'),\n  (3, '2024-06-11'),\n  (4, '2024-06-12'),\n  (5, '2024-06-13'),\n  (6, '2024-06-14'),\n  (7, '2024-06-15'),\n  (8, '2024-06-16'),\n  (9, '2024-06-17'),\n  (10, '2024-06-18'),\n  (11, '2024-06-19'),\n  (12, '2024-06-20'),\n  (13, '2024-06-21');"
+      },
+      {
+        "name": "Multiple events same weekday, skip other days",
+        "setupSql": "CREATE TABLE events (id INTEGER, event_date TEXT);\nINSERT INTO events (id, event_date) VALUES\n  (1, '2024-06-04'),\n  (2, '2024-06-11'),\n  (3, '2024-06-18'),\n  (4, '2024-06-25'),\n  (5, '2024-06-07'),\n  (6, '2024-06-14');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT CASE strftime('%w', event_date)\n         WHEN '0' THEN 'Sunday'\n         WHEN '1' THEN 'Monday'\n         WHEN '2' THEN 'Tuesday'\n         WHEN '3' THEN 'Wednesday'\n         WHEN '4' THEN 'Thursday'\n         WHEN '5' THEN 'Friday'\n         WHEN '6' THEN 'Saturday'\n       END AS weekday,\n       COUNT(*) AS cnt\nFROM events\nGROUP BY strftime('%w', event_date)\nORDER BY MIN(event_date);",
+      "note": "Orders by the earliest event date per group instead of by weekday number, which coincidentally matches on the example but breaks when a later weekday (higher number) has an earlier first date."
+    }
+  },
+  "every-product-and-units-sold": {
+    "tests": [
+      {
+        "name": "All products have no sales",
+        "setupSql": "CREATE TABLE products (id INTEGER, name TEXT);\nINSERT INTO products VALUES\n  (1, 'Alpha'), (2, 'Beta'), (3, 'Gamma');\nCREATE TABLE order_items (product_id INTEGER, qty INTEGER);"
+      },
+      {
+        "name": "NULL product_id in order_items exposes NOT IN trap",
+        "setupSql": "CREATE TABLE products (id INTEGER, name TEXT);\nINSERT INTO products VALUES\n  (1, 'Apple'), (2, 'Banana'), (3, 'Cherry');\nCREATE TABLE order_items (product_id INTEGER, qty INTEGER);\nINSERT INTO order_items VALUES\n  (1, 4), (2, 6), (NULL, 3);"
+      },
+      {
+        "name": "Single product with multiple order rows",
+        "setupSql": "CREATE TABLE products (id INTEGER, name TEXT);\nINSERT INTO products VALUES\n  (1, 'Widget');\nCREATE TABLE order_items (product_id INTEGER, qty INTEGER);\nINSERT INTO order_items VALUES\n  (1, 10), (1, 20), (1, 5);"
+      },
+      {
+        "name": "Multiple products none sold with one high-volume product",
+        "setupSql": "CREATE TABLE products (id INTEGER, name TEXT);\nINSERT INTO products VALUES\n  (1, 'Anchor'), (2, 'Bolt'), (3, 'Chain'), (4, 'Drill');\nCREATE TABLE order_items (product_id INTEGER, qty INTEGER);\nINSERT INTO order_items VALUES\n  (3, 7), (3, 3), (3, 5);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT p.name AS product, COALESCE(SUM(oi.qty), 0) AS units_sold\nFROM products p\nJOIN order_items oi ON oi.product_id = p.id\nGROUP BY p.id, p.name\nUNION ALL\nSELECT p.name, 0\nFROM products p\nWHERE p.id NOT IN (SELECT product_id FROM order_items)\nORDER BY product;",
+      "note": "Uses INNER JOIN + UNION ALL with NOT IN to add unsold products; when order_items contains a NULL product_id, NOT IN (subquery with NULL) yields UNKNOWN for every row, silently omitting all unsold products."
+    }
+  },
+  "exam-score-percentile": {
+    "tests": [
+      {
+        "name": "Three unique scores — fractional percentiles",
+        "setupSql": "CREATE TABLE scores (student TEXT, score INTEGER);\nINSERT INTO scores (student, score) VALUES\n  ('Alice', 40),\n  ('Bob',   70),\n  ('Carol', 90);"
+      },
+      {
+        "name": "Single row",
+        "setupSql": "CREATE TABLE scores (student TEXT, score INTEGER);\nINSERT INTO scores (student, score) VALUES\n  ('Alice', 75);"
+      },
+      {
+        "name": "All students tied — everyone at 100.0",
+        "setupSql": "CREATE TABLE scores (student TEXT, score INTEGER);\nINSERT INTO scores (student, score) VALUES\n  ('Alice', 80),\n  ('Bob',   80),\n  ('Carol', 80);"
+      },
+      {
+        "name": "Ties at bottom, one outlier at top",
+        "setupSql": "CREATE TABLE scores (student TEXT, score INTEGER);\nINSERT INTO scores (student, score) VALUES\n  ('Alice', 50),\n  ('Bob',   50),\n  ('Carol', 50),\n  ('Dave',  90);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT\n  student,\n  score,\n  ROUND(CUME_DIST() OVER (ORDER BY score) * 100, 0) AS percentile\nFROM scores\nORDER BY score, student;",
+      "note": "Uses ROUND(..., 0) instead of ROUND(..., 1) — matches the example (all values are whole multiples of 20) but fails when N=3 produces 33.3 and 66.7 which round to 33/67 not 33.3/66.7."
+    }
+  },
+  "extract-year-month-weekday": {
+    "tests": [
+      {
+        "name": "All Sundays",
+        "setupSql": "CREATE TABLE events (id INTEGER, event_date TEXT);\nINSERT INTO events (id, event_date) VALUES\n  (1, '2024-01-07'),\n  (2, '2024-03-10'),\n  (3, '2023-01-01');"
+      },
+      {
+        "name": "Year boundary",
+        "setupSql": "CREATE TABLE events (id INTEGER, event_date TEXT);\nINSERT INTO events (id, event_date) VALUES\n  (1, '2023-12-31'),\n  (2, '2024-01-01'),\n  (3, '2022-12-31'),\n  (4, '2023-01-01');"
+      },
+      {
+        "name": "Single leap-day Saturday",
+        "setupSql": "CREATE TABLE events (id INTEGER, event_date TEXT);\nINSERT INTO events (id, event_date) VALUES\n  (1, '2020-02-29');"
+      },
+      {
+        "name": "Six rows exposes LIMIT 5 trap",
+        "setupSql": "CREATE TABLE events (id INTEGER, event_date TEXT);\nINSERT INTO events (id, event_date) VALUES\n  (1, '2025-01-01'),\n  (2, '2025-02-14'),\n  (3, '2025-03-15'),\n  (4, '2025-06-21'),\n  (5, '2025-09-01'),\n  (6, '2025-12-25');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT id, event_date,\n       strftime('%Y', event_date) AS yr,\n       strftime('%m', event_date) AS mo,\n       strftime('%w', event_date) AS wday\nFROM events\nORDER BY id\nLIMIT 5;",
+      "note": "Hardcodes LIMIT 5 matching the example row count; returns only 5 rows on any dataset with 6+ events, silently dropping the extra rows."
+    }
+  },
+  "favorite-genre-per-user": {
+    "tests": [
+      {
+        "name": "Single entry per user",
+        "setupSql": "CREATE TABLE views (user TEXT, genre TEXT);\nINSERT INTO views (user, genre) VALUES\n  ('Alice', 'Drama'),\n  ('Bob',   'Comedy'),\n  ('Carol', 'Action');"
+      },
+      {
+        "name": "All users watch same genre",
+        "setupSql": "CREATE TABLE views (user TEXT, genre TEXT);\nINSERT INTO views (user, genre) VALUES\n  ('Ann', 'Drama'),\n  ('Ann', 'Drama'),\n  ('Bob', 'Drama'),\n  ('Bob', 'Drama'),\n  ('Bob', 'Drama'),\n  ('Cy',  'Drama'),\n  ('Cy',  'Drama');"
+      },
+      {
+        "name": "Clear winner different counts",
+        "setupSql": "CREATE TABLE views (user TEXT, genre TEXT);\nINSERT INTO views (user, genre) VALUES\n  ('Ann', 'Comedy'),\n  ('Ann', 'Comedy'),\n  ('Ann', 'Comedy'),\n  ('Ann', 'Drama'),\n  ('Bob', 'Thriller'),\n  ('Bob', 'Action'),\n  ('Bob', 'Action'),\n  ('Cy',  'Horror'),\n  ('Cy',  'Horror'),\n  ('Cy',  'Comedy');"
+      },
+      {
+        "name": "Single user many genres",
+        "setupSql": "CREATE TABLE views (user TEXT, genre TEXT);\nINSERT INTO views (user, genre) VALUES\n  ('Solo', 'Action'),\n  ('Solo', 'Action'),\n  ('Solo', 'Action'),\n  ('Solo', 'Drama'),\n  ('Solo', 'Drama'),\n  ('Solo', 'Comedy');"
+      }
+    ],
+    "trap": {
+      "sql": "WITH counts AS (\n  SELECT user, genre, COUNT(*) AS n\n  FROM views\n  GROUP BY user, genre\n  HAVING COUNT(*) >= 2\n)\nSELECT user, genre\nFROM (\n  SELECT user, genre,\n         ROW_NUMBER() OVER (PARTITION BY user ORDER BY n DESC, genre) AS rk\n  FROM counts\n)\nWHERE rk = 1\nORDER BY user;",
+      "note": "Filters out genres watched fewer than 2 times (HAVING COUNT(*) >= 2), which accidentally gives the right answer on datasets where every user has a clear winner watched ≥2 times, but silently omits users who appear only once per genre."
+    }
+  },
+  "fibonacci-sequence": {
+    "tests": [
+      {
+        "name": "Single term (n=1)",
+        "setupSql": "CREATE TABLE params (n INTEGER);\nINSERT INTO params (n) VALUES (1);"
+      },
+      {
+        "name": "Two terms (n=2)",
+        "setupSql": "CREATE TABLE params (n INTEGER);\nINSERT INTO params (n) VALUES (2);"
+      },
+      {
+        "name": "Five terms (n=5)",
+        "setupSql": "CREATE TABLE params (n INTEGER);\nINSERT INTO params (n) VALUES (5);"
+      },
+      {
+        "name": "Fifteen terms exposes hardcoded trap (n=15)",
+        "setupSql": "CREATE TABLE params (n INTEGER);\nINSERT INTO params (n) VALUES (15);"
+      }
+    ],
+    "trap": {
+      "sql": "WITH fib_vals(pos, val) AS (\n  VALUES (1,0),(2,1),(3,1),(4,2),(5,3),(6,5),(7,8),(8,13),(9,21),(10,34)\n)\nSELECT val AS fib FROM fib_vals\nWHERE pos <= (SELECT n FROM params)\nORDER BY pos;",
+      "note": "Hardcodes only the first 10 Fibonacci numbers; returns fewer rows than the oracle for any n > 10."
+    }
+  },
+  "fill-date-gaps": {
+    "tests": [
+      {
+        "name": "Single event",
+        "setupSql": "CREATE TABLE events (event_date TEXT, cnt INTEGER);\nINSERT INTO events (event_date, cnt) VALUES\n  ('2024-03-15', 42);"
+      },
+      {
+        "name": "No gaps — consecutive days",
+        "setupSql": "CREATE TABLE events (event_date TEXT, cnt INTEGER);\nINSERT INTO events (event_date, cnt) VALUES\n  ('2024-02-01', 3),\n  ('2024-02-02', 7),\n  ('2024-02-03', 1),\n  ('2024-02-04', 4),\n  ('2024-02-05', 9);"
+      },
+      {
+        "name": "Long gap in middle",
+        "setupSql": "CREATE TABLE events (event_date TEXT, cnt INTEGER);\nINSERT INTO events (event_date, cnt) VALUES\n  ('2024-05-01', 10),\n  ('2024-05-15', 20);"
+      },
+      {
+        "name": "Duplicate event date",
+        "setupSql": "CREATE TABLE events (event_date TEXT, cnt INTEGER);\nINSERT INTO events (event_date, cnt) VALUES\n  ('2024-06-01', 3),\n  ('2024-06-01', 5),\n  ('2024-06-03', 8);"
+      }
+    ],
+    "trap": {
+      "sql": "WITH RECURSIVE cal(d) AS (\n  SELECT MIN(event_date) FROM events\n  UNION ALL\n  SELECT date(d, '+1 day') FROM cal\n  WHERE d < (SELECT MAX(event_date) FROM events)\n)\nSELECT cal.d AS day, COALESCE(SUM(e.cnt), 0) AS cnt\nFROM cal\nLEFT JOIN events e ON e.event_date = cal.d\nGROUP BY cal.d\nORDER BY day;",
+      "note": "Uses GROUP BY + SUM(cnt) which collapses duplicate event_dates into one row with summed cnt instead of returning one row per original event record."
+    }
+  },
+  "filter-within-cte": {
+    "tests": [
+      {
+        "name": "All items in stock",
+        "setupSql": "CREATE TABLE products (name TEXT, category TEXT, price REAL, stock INTEGER);\nINSERT INTO products (name, category, price, stock) VALUES\n  ('Alpha', 'tech', 100, 5),\n  ('Beta', 'tech', 50, 3),\n  ('Gamma', 'home', 200, 1),\n  ('Delta', 'home', 80, 2);\n-- All items in stock: avg = (100+50+200+80)/4 = 107.5\n-- Above average: Alpha(100)? No. Gamma(200) yes. Others no.\n-- Result: Gamma(200)"
+      },
+      {
+        "name": "Single in-stock item yields empty result",
+        "setupSql": "CREATE TABLE products (name TEXT, category TEXT, price REAL, stock INTEGER);\nINSERT INTO products (name, category, price, stock) VALUES\n  ('Solo', 'tech', 99, 1),\n  ('Ghost', 'tech', 500, 0),\n  ('Phantom', 'home', 300, 0);\n-- Only Solo is in-stock; avg of in-stock = 99; 99 > 99 is false\n-- Result: empty"
+      },
+      {
+        "name": "Price exactly equals average is excluded",
+        "setupSql": "CREATE TABLE products (name TEXT, category TEXT, price REAL, stock INTEGER);\nINSERT INTO products (name, category, price, stock) VALUES\n  ('AtAvg', 'tech', 100, 5),\n  ('Below', 'tech', 50, 3),\n  ('Above', 'home', 150, 2),\n  ('OOStock', 'tech', 999, 0);\n-- In-stock: AtAvg(100), Below(50), Above(150); avg = 300/3 = 100\n-- 100 > 100 is false, so AtAvg excluded; only Above(150) qualifies\n-- Result: Above(150)"
+      },
+      {
+        "name": "Expensive out-of-stock items inflate all-products average",
+        "setupSql": "CREATE TABLE products (name TEXT, category TEXT, price REAL, stock INTEGER);\nINSERT INTO products (name, category, price, stock) VALUES\n  ('Cheap', 'tech', 10, 5),\n  ('Mid', 'tech', 20, 3),\n  ('Pricey', 'home', 30, 2),\n  ('LuxuryOOS', 'home', 1000, 0),\n  ('PremiumOOS', 'tech', 900, 0);\n-- In-stock: Cheap(10), Mid(20), Pricey(30); avg_in_stock = 60/3 = 20\n-- Items above in-stock avg (20): Pricey(30)\n-- All-products avg = (10+20+30+1000+900)/5 = 392 -- trap returns nothing\n-- Result: Pricey(30)"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT name, price\nFROM products\nWHERE stock > 0\n  AND price > (SELECT AVG(price) FROM products)\nORDER BY price DESC;",
+      "note": "Uses AVG over all products (including out-of-stock) instead of only in-stock items; on the example the result happens to be the same but diverges when out-of-stock items have very different prices."
+    }
+  },
+  "find-duplicate-emails": {
+    "tests": [
+      {
+        "name": "Case-folding (A@ vs a@ are different)",
+        "setupSql": "CREATE TABLE signups (id INTEGER, email TEXT);\nINSERT INTO signups (id, email) VALUES (1,'A@x.com'),(2,'a@x.com'),(3,'m@x.com'),(4,'m@x.com');"
+      },
+      {
+        "name": "No duplicates at all",
+        "setupSql": "CREATE TABLE signups (id INTEGER, email TEXT);\nINSERT INTO signups (id, email) VALUES (1,'one@x.com'),(2,'two@x.com'),(3,'three@x.com');"
+      },
+      {
+        "name": "Triplicate with a stray NULL",
+        "setupSql": "CREATE TABLE signups (id INTEGER, email TEXT);\nINSERT INTO signups (id, email) VALUES (1,NULL),(2,'z@x.com'),(3,'z@x.com'),(4,'z@x.com'),(5,'y@x.com');"
+      },
+      {
+        "name": "Everything duplicated",
+        "setupSql": "CREATE TABLE signups (id INTEGER, email TEXT);\nINSERT INTO signups (id, email) VALUES (1,'p@x.com'),(2,'p@x.com'),(3,'q@x.com'),(4,'q@x.com');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT LOWER(email) AS email FROM signups GROUP BY LOWER(email) HAVING COUNT(*) > 1 ORDER BY email;",
+      "note": "case-folds with LOWER(), so it wrongly treats A@x.com and a@x.com as one address"
+    }
+  },
+  "first-and-last-in-group": {
+    "tests": [
+      {
+        "name": "Single-row group",
+        "setupSql": "CREATE TABLE prices (symbol TEXT, day TEXT, close INTEGER);\nINSERT INTO prices (symbol, day, close) VALUES\n  ('AAA', '2024-01-01', 5),\n  ('BBB', '2024-01-01', 30),\n  ('BBB', '2024-01-02', 65),\n  ('BBB', '2024-01-03', 99);"
+      },
+      {
+        "name": "Two-row groups",
+        "setupSql": "CREATE TABLE prices (symbol TEXT, day TEXT, close INTEGER);\nINSERT INTO prices (symbol, day, close) VALUES\n  ('AAA', '2024-01-01', 20),\n  ('AAA', '2024-01-02', 25),\n  ('BBB', '2024-01-01', 100),\n  ('BBB', '2024-01-02', 80);"
+      },
+      {
+        "name": "Rows inserted out of order",
+        "setupSql": "CREATE TABLE prices (symbol TEXT, day TEXT, close INTEGER);\nINSERT INTO prices (symbol, day, close) VALUES\n  ('AAA', '2024-01-03', 99),\n  ('AAA', '2024-01-01', 10),\n  ('AAA', '2024-01-02', 20),\n  ('BBB', '2024-01-03', 77),\n  ('BBB', '2024-01-01', 50),\n  ('BBB', '2024-01-02', 60);"
+      },
+      {
+        "name": "Single symbol only",
+        "setupSql": "CREATE TABLE prices (symbol TEXT, day TEXT, close INTEGER);\nINSERT INTO prices (symbol, day, close) VALUES\n  ('CCC', '2024-01-01', 5),\n  ('CCC', '2024-01-02', 15),\n  ('CCC', '2024-01-03', 30),\n  ('CCC', '2024-01-04', 40);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT p.symbol, p.day, p.close,\n       (SELECT p2.close FROM prices p2\n        WHERE p2.symbol = p.symbol ORDER BY p2.day ASC LIMIT 1) AS first_close,\n       (SELECT p3.close FROM prices p3\n        WHERE p3.symbol = p.symbol ORDER BY p3.rowid DESC LIMIT 1) AS last_close\nFROM prices p\nORDER BY p.symbol, p.day;",
+      "note": "Uses ORDER BY rowid DESC instead of ORDER BY day DESC to find the last close — accidentally correct when rows are inserted in day order, but fails when rows are inserted out of chronological order."
+    }
+  },
+  "first-last-day-of-month": {
+    "tests": [
+      {
+        "name": "End-of-31-day-month dates",
+        "setupSql": "CREATE TABLE samples (id INTEGER, any_date TEXT);\nINSERT INTO samples (id, any_date) VALUES\n  (1, '2024-01-31'),\n  (2, '2024-03-31'),\n  (3, '2024-05-31');"
+      },
+      {
+        "name": "Leap year February boundary",
+        "setupSql": "CREATE TABLE samples (id INTEGER, any_date TEXT);\nINSERT INTO samples (id, any_date) VALUES\n  (1, '2024-02-01'),\n  (2, '2024-02-29');"
+      },
+      {
+        "name": "Non-leap February first and last",
+        "setupSql": "CREATE TABLE samples (id INTEGER, any_date TEXT);\nINSERT INTO samples (id, any_date) VALUES\n  (1, '2023-02-01'),\n  (2, '2023-02-28');"
+      },
+      {
+        "name": "Single row in October",
+        "setupSql": "CREATE TABLE samples (id INTEGER, any_date TEXT);\nINSERT INTO samples (id, any_date) VALUES\n  (1, '2024-10-15');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT id, any_date,\n       date(any_date, 'start of month') AS month_start,\n       date(any_date, '+1 month', 'start of month', '-1 day') AS month_end\nFROM samples\nORDER BY any_date;",
+      "note": "Applies '+1 month' before 'start of month' — for dates at the end of a 31-day month (e.g. 2024-03-31) SQLite overflows into the next month, so the modifier chain computes the last day of the wrong month instead of the current one."
+    }
+  },
+  "format-price-printf": {
+    "tests": [
+      {
+        "name": "Name exactly 10 chars",
+        "setupSql": "CREATE TABLE catalog (id INTEGER, name TEXT, price REAL);\nINSERT INTO catalog (id, name, price) VALUES\n  (1, 'Highlightr', 2.50),\n  (2, 'PaperClips', 0.75),\n  (3, 'WhiteBoard', 49.99);"
+      },
+      {
+        "name": "Name longer than 10 chars",
+        "setupSql": "CREATE TABLE catalog (id INTEGER, name TEXT, price REAL);\nINSERT INTO catalog (id, name, price) VALUES\n  (1, 'Pen', 1.50),\n  (2, 'Ballpoint Pen', 3.25),\n  (3, 'Correction Fluid', 5.99);"
+      },
+      {
+        "name": "Zero price",
+        "setupSql": "CREATE TABLE catalog (id INTEGER, name TEXT, price REAL);\nINSERT INTO catalog (id, name, price) VALUES\n  (1, 'Freebie', 0),\n  (2, 'Sample', 0.00),\n  (3, 'Promo', 1.00);"
+      },
+      {
+        "name": "Single row",
+        "setupSql": "CREATE TABLE catalog (id INTEGER, name TEXT, price REAL);\nINSERT INTO catalog (id, name, price) VALUES\n  (1, 'Eraser', 0.50);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT id,\n       printf('%-10.10s $%.2f', name, price) AS label\nFROM catalog\nORDER BY id;",
+      "note": "Using '%-10.10s' adds a precision specifier that truncates names longer than 10 chars; on the example all names are shorter than 10 so no truncation occurs and it matches, but names exceeding 10 chars get silently cut off instead of overflowing."
+    }
+  },
+  "gap-to-next-login": {
+    "tests": [
+      {
+        "name": "Single-login user excluded entirely",
+        "setupSql": "CREATE TABLE logins (user_name TEXT, login_date TEXT);\nINSERT INTO logins (user_name, login_date) VALUES\n  ('Alice', '2024-01-05'),\n  ('Bob',   '2024-01-10'),\n  ('Bob',   '2024-01-15'),\n  ('Carol', '2024-01-20');"
+      },
+      {
+        "name": "All users have only one login - empty result",
+        "setupSql": "CREATE TABLE logins (user_name TEXT, login_date TEXT);\nINSERT INTO logins (user_name, login_date) VALUES\n  ('Xena',  '2024-05-01'),\n  ('Yara',  '2024-05-02'),\n  ('Zack',  '2024-05-03');"
+      },
+      {
+        "name": "Consecutive daily logins - days_to_next = 1",
+        "setupSql": "CREATE TABLE logins (user_name TEXT, login_date TEXT);\nINSERT INTO logins (user_name, login_date) VALUES\n  ('Dan',  '2024-06-01'),\n  ('Dan',  '2024-06-02'),\n  ('Dan',  '2024-06-03'),\n  ('Eve',  '2024-06-10'),\n  ('Eve',  '2024-06-11');"
+      },
+      {
+        "name": "Gap crosses month boundary - day subtraction trap fails",
+        "setupSql": "CREATE TABLE logins (user_name TEXT, login_date TEXT);\nINSERT INTO logins (user_name, login_date) VALUES\n  ('Mia',  '2024-01-28'),\n  ('Mia',  '2024-02-03'),\n  ('Noa',  '2024-03-30'),\n  ('Noa',  '2024-04-05');"
+      }
+    ],
+    "trap": {
+      "sql": "WITH paired AS (\n  SELECT\n    user_name,\n    login_date,\n    LEAD(login_date) OVER (PARTITION BY user_name ORDER BY login_date) AS next_login_date\n  FROM logins\n)\nSELECT\n  user_name,\n  login_date,\n  next_login_date,\n  CAST(SUBSTR(next_login_date, 9, 2) AS INTEGER) - CAST(SUBSTR(login_date, 9, 2) AS INTEGER) AS days_to_next\nFROM paired\nWHERE next_login_date IS NOT NULL\nORDER BY user_name, login_date;",
+      "note": "Computes days_to_next by subtracting day-of-month strings (SUBSTR day9,2) instead of using JULIANDAY; gives correct results when both dates are in the same month but fails when the gap crosses a month boundary."
+    }
+  },
+  "generate-number-sequence": {
+    "tests": [
+      {
+        "name": "n equals 1",
+        "setupSql": "CREATE TABLE params (n INTEGER);\nINSERT INTO params (n) VALUES (1);"
+      },
+      {
+        "name": "n equals 0 (empty result)",
+        "setupSql": "CREATE TABLE params (n INTEGER);\nINSERT INTO params (n) VALUES (0);"
+      },
+      {
+        "name": "n equals 5",
+        "setupSql": "CREATE TABLE params (n INTEGER);\nINSERT INTO params (n) VALUES (5);"
+      },
+      {
+        "name": "n equals 3",
+        "setupSql": "CREATE TABLE params (n INTEGER);\nINSERT INTO params (n) VALUES (3);"
+      }
+    ],
+    "trap": {
+      "sql": "WITH RECURSIVE seq(num) AS (\n  SELECT 1\n  UNION ALL\n  SELECT num + 1 FROM seq\n  WHERE num < 10\n)\nSELECT num FROM seq ORDER BY num;",
+      "note": "Hardcodes the upper limit as 10 instead of reading n from the params table; matches the example (n=10) but returns wrong results for any other value of n."
+    }
+  },
+  "grade-distribution-by-class": {
+    "tests": [
+      {
+        "name": "Single class single grade",
+        "setupSql": "CREATE TABLE results (class TEXT, student TEXT, grade TEXT);\nINSERT INTO results (class, student, grade) VALUES\n  ('Art', 'Lily', 'A'),\n  ('Art', 'Mark', 'A'),\n  ('Art', 'Nina', 'A');"
+      },
+      {
+        "name": "Duplicate rows same student",
+        "setupSql": "CREATE TABLE results (class TEXT, student TEXT, grade TEXT);\nINSERT INTO results (class, student, grade) VALUES\n  ('Math', 'Ann', 'A'),\n  ('Math', 'Ann', 'A'),\n  ('Math', 'Bob', 'B'),\n  ('History', 'Cal', 'C'),\n  ('History', 'Cal', 'C');"
+      },
+      {
+        "name": "NULL grade forms its own group",
+        "setupSql": "CREATE TABLE results (class TEXT, student TEXT, grade TEXT);\nINSERT INTO results (class, student, grade) VALUES\n  ('Bio', 'Ada',  'A'),\n  ('Bio', 'Ben',  'A'),\n  ('Bio', 'Cara', NULL),\n  ('Bio', 'Dan',  NULL),\n  ('PE',  'Eva',  'B');"
+      },
+      {
+        "name": "All grades distinct across three classes",
+        "setupSql": "CREATE TABLE results (class TEXT, student TEXT, grade TEXT);\nINSERT INTO results (class, student, grade) VALUES\n  ('Art',     'Amy',  'A'),\n  ('Art',     'Bea',  'B'),\n  ('Art',     'Cam',  'C'),\n  ('Music',   'Dan',  'A'),\n  ('Music',   'Eli',  'B'),\n  ('Sports',  'Fay',  'A'),\n  ('Sports',  'Gil',  'A'),\n  ('Sports',  'Hal',  'C');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT class, grade, COUNT(DISTINCT student) AS students\nFROM results\nGROUP BY class, grade\nORDER BY class, grade;",
+      "note": "Uses COUNT(DISTINCT student) instead of COUNT(*); matches example where all students are unique but undercounts when the same student row is inserted twice (duplicate rows)."
+    }
+  },
+  "headcount-per-department": {
+    "tests": [
+      {
+        "name": "Empty department excluded",
+        "setupSql": "CREATE TABLE departments (id INTEGER, name TEXT);\nINSERT INTO departments VALUES\n  (1, 'Engineering'), (2, 'Sales'), (3, 'Marketing');\nCREATE TABLE employees (id INTEGER, name TEXT, dept_id INTEGER);\nINSERT INTO employees VALUES\n  (1, 'Ana', 1), (2, 'Bo', 1),\n  (3, 'Cy', 2);"
+      },
+      {
+        "name": "Tie broken by department name",
+        "setupSql": "CREATE TABLE departments (id INTEGER, name TEXT);\nINSERT INTO departments VALUES\n  (1, 'Zebra'), (2, 'Alpha'), (3, 'Marketing');\nCREATE TABLE employees (id INTEGER, name TEXT, dept_id INTEGER);\nINSERT INTO employees VALUES\n  (1, 'Ana', 1), (2, 'Bo', 2), (3, 'Cy', 3),\n  (4, 'Di', 1), (5, 'Ed', 2), (6, 'Fi', 3);"
+      },
+      {
+        "name": "Single department with employees",
+        "setupSql": "CREATE TABLE departments (id INTEGER, name TEXT);\nINSERT INTO departments VALUES\n  (1, 'Engineering'), (2, 'HR');\nCREATE TABLE employees (id INTEGER, name TEXT, dept_id INTEGER);\nINSERT INTO employees VALUES\n  (1, 'Ana', 1), (2, 'Bo', 1), (3, 'Cy', 1);"
+      },
+      {
+        "name": "Multiple ties all same headcount",
+        "setupSql": "CREATE TABLE departments (id INTEGER, name TEXT);\nINSERT INTO departments VALUES\n  (1, 'Delta'), (2, 'Alpha'), (3, 'Charlie'), (4, 'Bravo');\nCREATE TABLE employees (id INTEGER, name TEXT, dept_id INTEGER);\nINSERT INTO employees VALUES\n  (1, 'Ana', 1), (2, 'Bo', 2), (3, 'Cy', 3), (4, 'Di', 4);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT d.name AS department, COUNT(*) AS headcount\nFROM departments d\nLEFT JOIN employees e ON e.dept_id = d.id\nGROUP BY d.id, d.name\nORDER BY headcount DESC, department;",
+      "note": "Uses LEFT JOIN instead of INNER JOIN, so empty departments appear with headcount 0 instead of being excluded."
+    }
+  },
+  "high-value-orders-derived-table": {
+    "tests": [
+      {
+        "name": "Exact threshold boundary",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers (id, name) VALUES\n  (1, 'Alice'),\n  (2, 'Bob'),\n  (3, 'Carol');\n\nCREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER);\nINSERT INTO orders (id, customer_id, amount) VALUES\n  (1, 1, 100),\n  (2, 2, 99),\n  (3, 3, 50),\n  (4, 3, 50);"
+      },
+      {
+        "name": "Ties in total_spent need name tiebreak",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers (id, name) VALUES\n  (1, 'Zara'),\n  (2, 'Amy'),\n  (3, 'Mike'),\n  (4, 'Low');\n\nCREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER);\nINSERT INTO orders (id, customer_id, amount) VALUES\n  (1, 1, 150),\n  (2, 2, 150),\n  (3, 3, 200),\n  (4, 4, 50);"
+      },
+      {
+        "name": "All customers qualify",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers (id, name) VALUES\n  (1, 'Ana'),\n  (2, 'Ben'),\n  (3, 'Cam');\n\nCREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER);\nINSERT INTO orders (id, customer_id, amount) VALUES\n  (1, 1, 100),\n  (2, 2, 200),\n  (3, 3, 300),\n  (4, 1, 50);"
+      },
+      {
+        "name": "No customers qualify — empty result",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers (id, name) VALUES\n  (1, 'Ada'),\n  (2, 'Bea');\n\nCREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER);\nINSERT INTO orders (id, customer_id, amount) VALUES\n  (1, 1, 40),\n  (2, 1, 50),\n  (3, 2, 30);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT t.name AS name, t.total_spent AS total_spent\nFROM (\n  SELECT c.name AS name, SUM(o.amount) AS total_spent\n  FROM customers c\n  JOIN orders o ON o.customer_id = c.id\n  GROUP BY c.id, c.name\n) t\nWHERE t.total_spent > 100\nORDER BY t.total_spent DESC, t.name;",
+      "note": "Uses > 100 instead of >= 100, so a customer with total_spent exactly 100 is incorrectly excluded."
+    }
+  },
+  "highest-and-lowest-earner": {
+    "tests": [
+      {
+        "name": "Two employees only",
+        "setupSql": "CREATE TABLE employees (name TEXT, dept TEXT, salary INTEGER);\nINSERT INTO employees (name, dept, salary) VALUES\n  ('Alice', 'eng', 200),\n  ('Bob', 'sales', 50);"
+      },
+      {
+        "name": "Negative salary is the lowest",
+        "setupSql": "CREATE TABLE employees (name TEXT, dept TEXT, salary INTEGER);\nINSERT INTO employees (name, dept, salary) VALUES\n  ('Anna', 'eng', 300),\n  ('Ben', 'sales', 120),\n  ('Cara', 'hr', -40),\n  ('Dan', 'eng', 80);"
+      },
+      {
+        "name": "Highest earner in hr dept, lowest in eng",
+        "setupSql": "CREATE TABLE employees (name TEXT, dept TEXT, salary INTEGER);\nINSERT INTO employees (name, dept, salary) VALUES\n  ('Zoe', 'hr', 500),\n  ('Tom', 'eng', 30),\n  ('Uma', 'sales', 220),\n  ('Val', 'eng', 150),\n  ('Wes', 'sales', 90);"
+      },
+      {
+        "name": "Large dataset, extremes at both ends",
+        "setupSql": "CREATE TABLE employees (name TEXT, dept TEXT, salary INTEGER);\nINSERT INTO employees (name, dept, salary) VALUES\n  ('E1', 'eng', 100),\n  ('E2', 'sales', 200),\n  ('E3', 'hr', 999),\n  ('E4', 'eng', 300),\n  ('E5', 'sales', 150),\n  ('E6', 'hr', 10),\n  ('E7', 'eng', 400),\n  ('E8', 'sales', 75);"
+      }
+    ],
+    "trap": {
+      "sql": "WITH top AS (\n  SELECT 'highest' AS kind, name, salary FROM employees WHERE dept = 'eng' ORDER BY salary DESC LIMIT 1\n),\nbottom AS (\n  SELECT 'lowest' AS kind, name, salary FROM employees WHERE dept = 'sales' ORDER BY salary ASC LIMIT 1\n)\nSELECT kind, name, salary FROM top\nUNION ALL\nSELECT kind, name, salary FROM bottom\nORDER BY salary DESC;",
+      "note": "Filters highest to 'eng' dept and lowest to 'sales' dept — coincidentally correct on the example but wrong when extremes live in other departments."
+    }
+  },
+  "is-null-three-valued-logic": {
+    "tests": [
+      {
+        "name": "All NULL assignees — empty result",
+        "setupSql": "CREATE TABLE tasks (id INTEGER, title TEXT, assignee TEXT);\nINSERT INTO tasks (id, title, assignee) VALUES\n  (1, 'Task A', NULL),\n  (2, 'Task B', NULL),\n  (3, 'Task C', NULL);"
+      },
+      {
+        "name": "No NULLs — all rows returned as assigned",
+        "setupSql": "CREATE TABLE tasks (id INTEGER, title TEXT, assignee TEXT);\nINSERT INTO tasks (id, title, assignee) VALUES\n  (1, 'Alpha',  'Dave'),\n  (2, 'Beta',   'Eve'),\n  (3, 'Gamma',  'Frank');"
+      },
+      {
+        "name": "Empty string assignee treated as assigned (not NULL)",
+        "setupSql": "CREATE TABLE tasks (id INTEGER, title TEXT, assignee TEXT);\nINSERT INTO tasks (id, title, assignee) VALUES\n  (1, 'Has assignee',   'Alice'),\n  (2, 'Empty string',   ''),\n  (3, 'NULL assignee',  NULL),\n  (4, 'Another person', 'Bob');"
+      },
+      {
+        "name": "Single assigned row",
+        "setupSql": "CREATE TABLE tasks (id INTEGER, title TEXT, assignee TEXT);\nINSERT INTO tasks (id, title, assignee) VALUES\n  (1, 'Only task', 'Zara');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT id, title,\n       CASE WHEN assignee IS NULL THEN 'unassigned' ELSE 'assigned' END AS status\nFROM tasks\nWHERE assignee <> ''\nORDER BY id;",
+      "note": "Uses `assignee <> ''` instead of `assignee IS NOT NULL`, which excludes empty-string assignees (treating them as unassigned) and also silently excludes NULLs only because `NULL <> ''` is UNKNOWN — passes on datasets where all assignees are non-empty non-NULL strings, but fails when an empty-string assignee should be included."
+    }
+  },
+  "last-n-days-window": {
+    "tests": [
+      {
+        "name": "IDs out of date order",
+        "setupSql": "CREATE TABLE orders (id INTEGER, order_date TEXT);\nINSERT INTO orders (id, order_date) VALUES\n  (10, '2024-05-16'),\n  (5,  '2024-05-25'),\n  (8,  '2024-06-01'),\n  (3,  '2024-06-10'),\n  (1,  '2024-06-20');"
+      },
+      {
+        "name": "All orders outside the window",
+        "setupSql": "CREATE TABLE orders (id INTEGER, order_date TEXT);\nINSERT INTO orders (id, order_date) VALUES\n  (1, '2024-01-01'),\n  (2, '2024-05-15'),\n  (3, '2024-06-16'),\n  (4, '2024-07-01');"
+      },
+      {
+        "name": "Single row exactly on lower boundary",
+        "setupSql": "CREATE TABLE orders (id INTEGER, order_date TEXT);\nINSERT INTO orders (id, order_date) VALUES\n  (1, '2024-04-01'),\n  (2, '2024-05-15'),\n  (3, '2024-05-16'),\n  (4, '2024-06-16');"
+      },
+      {
+        "name": "Single row exactly on upper boundary",
+        "setupSql": "CREATE TABLE orders (id INTEGER, order_date TEXT);\nINSERT INTO orders (id, order_date) VALUES\n  (1, '2024-01-10'),\n  (2, '2024-05-14'),\n  (3, '2024-06-15'),\n  (4, '2024-06-16');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT id, order_date,\n       CAST(julianday('2024-06-15') - julianday(order_date) AS INTEGER) AS days_ago\nFROM orders\nWHERE order_date >= date('2024-06-15', '-30 days')\n  AND order_date <= '2024-06-15'\nORDER BY id;",
+      "note": "Orders by id instead of order_date; passes the example because ids happen to be in the same ascending date order, but fails when ids are not in date order."
+    }
+  },
+  "mask-phone-numbers": {
+    "tests": [
+      {
+        "name": "All digits only",
+        "setupSql": "CREATE TABLE contacts (id INTEGER, phone TEXT);\nINSERT INTO contacts (id, phone) VALUES\n  (1, '5551234567'),\n  (2, '8005550199'),\n  (3, '2128675309');"
+      },
+      {
+        "name": "Only spaces as separators",
+        "setupSql": "CREATE TABLE contacts (id INTEGER, phone TEXT);\nINSERT INTO contacts (id, phone) VALUES\n  (1, '555 123 4567'),\n  (2, '800 555 0199'),\n  (3, '212 867 5309');"
+      },
+      {
+        "name": "Only dashes as separators",
+        "setupSql": "CREATE TABLE contacts (id INTEGER, phone TEXT);\nINSERT INTO contacts (id, phone) VALUES\n  (1, '555-123-4567'),\n  (2, '800-555-0199'),\n  (3, '212-867-5309');"
+      },
+      {
+        "name": "Paren without trailing space",
+        "setupSql": "CREATE TABLE contacts (id INTEGER, phone TEXT);\nINSERT INTO contacts (id, phone) VALUES\n  (1, '(555)1234567'),\n  (2, '(800)5550199'),\n  (3, '555-123-4567');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT id, phone,\n       replace(replace(replace(replace(phone, ') ', ''), '(', ''), '-', ''), ' ', '') AS clean\nFROM contacts\nORDER BY id;",
+      "note": "Treats ') ' as a two-character unit instead of removing ')' alone; works on the example where ')' is always followed by a space, but leaves a stray ')' for formats like '(555)1234567' where ')' is not followed by a space."
+    }
+  },
+  "median-home-price": {
+    "tests": [
+      {
+        "name": "Odd count — single middle row",
+        "setupSql": "CREATE TABLE homes (id INTEGER, price INTEGER);\nINSERT INTO homes (id, price) VALUES\n  (1, 100000),\n  (2, 200000),\n  (3, 300000),\n  (4, 400000),\n  (5, 500000);"
+      },
+      {
+        "name": "Even count — two middle rows with different prices",
+        "setupSql": "CREATE TABLE homes (id INTEGER, price INTEGER);\nINSERT INTO homes (id, price) VALUES\n  (1, 100000),\n  (2, 200000),\n  (3, 350000),\n  (4, 600000);"
+      },
+      {
+        "name": "Single row — median equals only price",
+        "setupSql": "CREATE TABLE homes (id INTEGER, price INTEGER);\nINSERT INTO homes (id, price) VALUES\n  (1, 750000);"
+      },
+      {
+        "name": "Duplicate prices not at median boundary",
+        "setupSql": "CREATE TABLE homes (id INTEGER, price INTEGER);\nINSERT INTO homes (id, price) VALUES\n  (1, 100000),\n  (2, 100000),\n  (3, 300000),\n  (4, 400000),\n  (5, 600000),\n  (6, 700000);"
+      }
+    ],
+    "trap": {
+      "sql": "WITH ordered AS (\n  SELECT price, ROW_NUMBER() OVER (ORDER BY price) AS rn,\n         COUNT(*) OVER () AS n\n  FROM homes\n)\nSELECT ROUND(AVG(price), 2) AS median_price\nFROM ordered\nWHERE rn IN (n / 2, n / 2 + 1);",
+      "note": "Uses integer division n/2 instead of (n+1)/2 to find median positions — picks the wrong pair for odd-count tables (e.g., n=5 selects rows 2 and 3 instead of just row 3)."
+    }
+  },
+  "menu-symmetric-difference": {
+    "tests": [
+      {
+        "name": "All items shared — empty result",
+        "setupSql": "CREATE TABLE downtown_menu (item TEXT);\nINSERT INTO downtown_menu (item) VALUES\n  ('Latte'), ('Mocha'), ('Bagel');\n\nCREATE TABLE uptown_menu (item TEXT);\nINSERT INTO uptown_menu (item) VALUES\n  ('Latte'), ('Mocha'), ('Bagel');"
+      },
+      {
+        "name": "NULL item only in uptown — poisons NOT IN",
+        "setupSql": "CREATE TABLE downtown_menu (item TEXT);\nINSERT INTO downtown_menu (item) VALUES\n  ('Espresso'), ('Latte');\n\nCREATE TABLE uptown_menu (item TEXT);\nINSERT INTO uptown_menu (item) VALUES\n  ('Latte'), ('Muffin'), (NULL);"
+      },
+      {
+        "name": "Heavy duplicates deduplicated",
+        "setupSql": "CREATE TABLE downtown_menu (item TEXT);\nINSERT INTO downtown_menu (item) VALUES\n  ('Coffee'), ('Coffee'), ('Coffee'), ('Tea'), ('Tea');\n\nCREATE TABLE uptown_menu (item TEXT);\nINSERT INTO uptown_menu (item) VALUES\n  ('Tea'), ('Juice'), ('Juice');"
+      },
+      {
+        "name": "One menu completely empty",
+        "setupSql": "CREATE TABLE downtown_menu (item TEXT);\n\nCREATE TABLE uptown_menu (item TEXT);\nINSERT INTO uptown_menu (item) VALUES\n  ('Americano'), ('Cappuccino'), ('Flat White');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT t.item AS item, t.only_at AS only_at\nFROM (\n  SELECT DISTINCT d.item AS item, 'downtown' AS only_at\n  FROM downtown_menu d\n  WHERE d.item NOT IN (SELECT item FROM uptown_menu)\n  UNION ALL\n  SELECT DISTINCT u.item AS item, 'uptown' AS only_at\n  FROM uptown_menu u\n  WHERE u.item NOT IN (SELECT item FROM downtown_menu)\n) t\nORDER BY t.item;",
+      "note": "Uses NOT IN instead of NOT EXISTS or EXCEPT — when uptown_menu contains NULL, the subquery returns a set with NULL, and x NOT IN (NULL, ...) evaluates to UNKNOWN (not TRUE), silently dropping all downtown-only rows."
+    }
+  },
+  "month-over-month-change": {
+    "tests": [
+      {
+        "name": "Single row — first month delta is NULL",
+        "setupSql": "CREATE TABLE monthly (month TEXT, revenue INTEGER);\nINSERT INTO monthly (month, revenue) VALUES\n  ('2024-06', 5000);"
+      },
+      {
+        "name": "Year boundary — LAG crosses calendar years",
+        "setupSql": "CREATE TABLE monthly (month TEXT, revenue INTEGER);\nINSERT INTO monthly (month, revenue) VALUES\n  ('2023-11', 800),\n  ('2023-12', 950),\n  ('2024-01', 1100),\n  ('2024-02', 700);"
+      },
+      {
+        "name": "Zero delta — consecutive months with same revenue",
+        "setupSql": "CREATE TABLE monthly (month TEXT, revenue INTEGER);\nINSERT INTO monthly (month, revenue) VALUES\n  ('2024-01', 500),\n  ('2024-02', 500),\n  ('2024-03', 600);"
+      },
+      {
+        "name": "Rows inserted out of order — ordering must come from month value",
+        "setupSql": "CREATE TABLE monthly (month TEXT, revenue INTEGER);\nINSERT INTO monthly (month, revenue) VALUES\n  ('2024-03', 300),\n  ('2024-01', 100),\n  ('2024-04', 400),\n  ('2024-02', 200);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT month, revenue,\n       revenue - LAG(revenue) OVER (PARTITION BY substr(month, 1, 4) ORDER BY month) AS delta\nFROM monthly\nORDER BY month;",
+      "note": "Partitions by year, so the first month of each new year resets to NULL delta — matches the example (all 2024) but wrongly NULLs the delta for 2024-01 when the dataset spans two years."
+    }
+  },
+  "monthly-revenue-pivot-total": {
+    "tests": [
+      {
+        "name": "Single region",
+        "setupSql": "CREATE TABLE revenue (region TEXT, month TEXT, amount INTEGER);\nINSERT INTO revenue (region, month, amount) VALUES\n  ('Central', 'Jan', 200), ('Central', 'Feb', 300), ('Central', 'Mar', 400);"
+      },
+      {
+        "name": "Duplicate month rows expose MAX-vs-SUM trap",
+        "setupSql": "CREATE TABLE revenue (region TEXT, month TEXT, amount INTEGER);\nINSERT INTO revenue (region, month, amount) VALUES\n  ('Alpha', 'Jan', 50),  ('Alpha', 'Jan', 50),  ('Alpha', 'Feb', 80),  ('Alpha', 'Mar', 90),\n  ('Beta',  'Jan', 100), ('Beta',  'Feb', 120), ('Beta',  'Mar', 130);"
+      },
+      {
+        "name": "Zero amount values",
+        "setupSql": "CREATE TABLE revenue (region TEXT, month TEXT, amount INTEGER);\nINSERT INTO revenue (region, month, amount) VALUES\n  ('East',  'Jan', 0),   ('East',  'Feb', 0),   ('East',  'Mar', 0),\n  ('South', 'Jan', 50),  ('South', 'Feb', 75),  ('South', 'Mar', 25);"
+      },
+      {
+        "name": "Many regions alphabetical ordering",
+        "setupSql": "CREATE TABLE revenue (region TEXT, month TEXT, amount INTEGER);\nINSERT INTO revenue (region, month, amount) VALUES\n  ('Zeta',    'Jan', 10), ('Zeta',    'Feb', 20), ('Zeta',    'Mar', 30),\n  ('Alpha',   'Jan', 40), ('Alpha',   'Feb', 50), ('Alpha',   'Mar', 60),\n  ('Midwest', 'Jan', 70), ('Midwest', 'Feb', 80), ('Midwest', 'Mar', 90),\n  ('Beta',    'Jan', 15), ('Beta',    'Feb', 25), ('Beta',    'Mar', 35);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT region,\n       MAX(CASE WHEN month = 'Jan' THEN amount END) AS jan,\n       MAX(CASE WHEN month = 'Feb' THEN amount END) AS feb,\n       MAX(CASE WHEN month = 'Mar' THEN amount END) AS mar,\n       MAX(CASE WHEN month = 'Jan' THEN amount END)\n         + MAX(CASE WHEN month = 'Feb' THEN amount END)\n         + MAX(CASE WHEN month = 'Mar' THEN amount END) AS total\nFROM revenue\nGROUP BY region\nORDER BY region;",
+      "note": "Uses MAX instead of SUM for pivoting — identical to the oracle when each region has exactly one row per month (as in the example), but gives wrong pivot values and wrong total when a month has multiple rows for the same region."
+    }
+  },
+  "most-expensive-order-per-customer": {
+    "tests": [
+      {
+        "name": "Single order per customer",
+        "setupSql": "CREATE TABLE orders (order_id INTEGER, customer TEXT, amount INTEGER);\nINSERT INTO orders (order_id, customer, amount) VALUES\n  (1, 'Ada',  100),\n  (2, 'Bea',  200),\n  (3, 'Cleo', 150);"
+      },
+      {
+        "name": "Max order is not the first order_id",
+        "setupSql": "CREATE TABLE orders (order_id INTEGER, customer TEXT, amount INTEGER);\nINSERT INTO orders (order_id, customer, amount) VALUES\n  (1, 'Ada',  10),\n  (2, 'Ada',  30),\n  (3, 'Ada',  20),\n  (4, 'Bea',  5),\n  (5, 'Bea',  50),\n  (6, 'Bea',  25);"
+      },
+      {
+        "name": "Single customer multiple orders",
+        "setupSql": "CREATE TABLE orders (order_id INTEGER, customer TEXT, amount INTEGER);\nINSERT INTO orders (order_id, customer, amount) VALUES\n  (1, 'Ada',  10),\n  (2, 'Ada',  500),\n  (3, 'Ada',  250),\n  (4, 'Ada',  100);"
+      },
+      {
+        "name": "Tied max amount for one customer returns both rows",
+        "setupSql": "CREATE TABLE orders (order_id INTEGER, customer TEXT, amount INTEGER);\nINSERT INTO orders (order_id, customer, amount) VALUES\n  (1, 'Ada',  90),\n  (2, 'Ada',  90),\n  (3, 'Bea',  70),\n  (4, 'Bea',  65),\n  (5, 'Cleo', 200),\n  (6, 'Cleo', 199);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT o.customer AS customer, MIN(o.order_id) AS order_id, o.amount AS amount\nFROM orders o\nINNER JOIN (\n  SELECT customer, MAX(amount) AS max_amount\n  FROM orders\n  GROUP BY customer\n) m ON o.customer = m.customer AND o.amount = m.max_amount\nGROUP BY o.customer, o.amount\nORDER BY o.customer;",
+      "note": "Uses MIN(order_id) to collapse ties — when a customer has two orders with the same max amount, it returns only 1 row instead of 2, diverging from the oracle which returns all rows matching the MAX."
+    }
+  },
+  "multi-key-ordering": {
+    "tests": [
+      {
+        "name": "Name tie-breaker required",
+        "setupSql": "CREATE TABLE employees (name TEXT, dept TEXT, salary INTEGER);\nINSERT INTO employees (name, dept, salary) VALUES\n  ('Zoe', 'Eng', 100),\n  ('Amy', 'Eng', 100),\n  ('Bob', 'Eng', 100),\n  ('Max', 'Sales', 90),\n  ('Jan', 'Sales', 90);"
+      },
+      {
+        "name": "Single employee per dept",
+        "setupSql": "CREATE TABLE employees (name TEXT, dept TEXT, salary INTEGER);\nINSERT INTO employees (name, dept, salary) VALUES\n  ('Alice', 'Eng', 120),\n  ('Bob', 'HR', 80),\n  ('Carol', 'Ops', 95),\n  ('Dave', 'Sales', 110);"
+      },
+      {
+        "name": "All same dept",
+        "setupSql": "CREATE TABLE employees (name TEXT, dept TEXT, salary INTEGER);\nINSERT INTO employees (name, dept, salary) VALUES\n  ('Zara', 'Eng', 50),\n  ('Mike', 'Eng', 200),\n  ('Anna', 'Eng', 200),\n  ('Pete', 'Eng', 150),\n  ('Lily', 'Eng', 150);"
+      },
+      {
+        "name": "NULL salary rows",
+        "setupSql": "CREATE TABLE employees (name TEXT, dept TEXT, salary INTEGER);\nINSERT INTO employees (name, dept, salary) VALUES\n  ('Abe', 'Eng', 100),\n  ('Ben', 'Eng', NULL),\n  ('Cal', 'Eng', 100),\n  ('Dan', 'Ops', NULL),\n  ('Eve', 'Ops', 80);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT dept, name, salary\nFROM employees\nORDER BY dept ASC, salary DESC;",
+      "note": "Missing the third sort key `name ASC`; when multiple rows share the same dept and salary, their relative order is undefined — matches the example by accident but fails when name ordering is the only differentiator."
+    }
+  },
+  "not-in-null-trap": {
+    "tests": [
+      {
+        "name": "All customers have orders (empty result)",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers (id, name) VALUES\n  (1, 'Alice'),\n  (2, 'Bob'),\n  (3, 'Carol');\nCREATE TABLE orders (order_id INTEGER, customer_id INTEGER);\nINSERT INTO orders (order_id, customer_id) VALUES\n  (101, 1),\n  (102, 2),\n  (103, 3),\n  (104, NULL);"
+      },
+      {
+        "name": "Multiple NULLs in orders, several customers without orders",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers (id, name) VALUES\n  (1, 'Alice'),\n  (2, 'Bob'),\n  (3, 'Carol'),\n  (4, 'Dan');\nCREATE TABLE orders (order_id INTEGER, customer_id INTEGER);\nINSERT INTO orders (order_id, customer_id) VALUES\n  (101, 1),\n  (102, NULL),\n  (103, NULL),\n  (104, NULL);"
+      },
+      {
+        "name": "No NULLs in orders, some customers without orders",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers (id, name) VALUES\n  (1, 'Alice'),\n  (2, 'Bob'),\n  (3, 'Carol'),\n  (4, 'Dan'),\n  (5, 'Eve');\nCREATE TABLE orders (order_id INTEGER, customer_id INTEGER);\nINSERT INTO orders (order_id, customer_id) VALUES\n  (101, 1),\n  (102, 2),\n  (103, 3);"
+      },
+      {
+        "name": "Customer id=0 with NULL in orders (COALESCE trap bait)",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers (id, name) VALUES\n  (0, 'Zero'),\n  (1, 'Alice'),\n  (2, 'Bob'),\n  (3, 'Carol');\nCREATE TABLE orders (order_id INTEGER, customer_id INTEGER);\nINSERT INTO orders (order_id, customer_id) VALUES\n  (101, 1),\n  (102, 3),\n  (103, NULL);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT c.id, c.name\nFROM customers c\nWHERE c.id NOT IN (SELECT COALESCE(customer_id, 0) FROM orders)\nORDER BY c.id;",
+      "note": "Uses COALESCE to replace NULL with 0, which silently excludes any customer whose id is 0 — it appears to have an order due to the NULL-to-0 substitution."
+    }
+  },
+  "nth-highest-salary": {
+    "tests": [
+      {
+        "name": "Multiple ties at the top salary",
+        "setupSql": "CREATE TABLE employees (name TEXT, salary INTEGER);\nINSERT INTO employees (name, salary) VALUES\n  ('Alice', 300),\n  ('Bob', 300),\n  ('Carol', 300),\n  ('Dave', 200),\n  ('Eve', 200),\n  ('Frank', 100);"
+      },
+      {
+        "name": "Only one distinct salary — empty result",
+        "setupSql": "CREATE TABLE employees (name TEXT, salary INTEGER);\nINSERT INTO employees (name, salary) VALUES\n  ('Alice', 500),\n  ('Bob', 500),\n  ('Carol', 500);"
+      },
+      {
+        "name": "Exactly two distinct salaries",
+        "setupSql": "CREATE TABLE employees (name TEXT, salary INTEGER);\nINSERT INTO employees (name, salary) VALUES\n  ('Alice', 1000),\n  ('Bob', 500),\n  ('Carol', 500),\n  ('Dave', 500);"
+      },
+      {
+        "name": "Single employee is the second highest",
+        "setupSql": "CREATE TABLE employees (name TEXT, salary INTEGER);\nINSERT INTO employees (name, salary) VALUES\n  ('Zara', 999),\n  ('Zara', 999),\n  ('Mona', 888),\n  ('Nile', 777);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT name, salary\nFROM employees e\nWHERE (\n  SELECT COUNT(*)\n  FROM employees e2\n  WHERE e2.salary > e.salary\n) = 1\nORDER BY name;",
+      "note": "Uses COUNT(*) instead of COUNT(DISTINCT) — overcounts when multiple employees share the top salary, so employees with the second-highest salary get excluded when more than one person earns the maximum."
+    }
+  },
+  "nullif-avoid-divide-by-zero": {
+    "tests": [
+      {
+        "name": "All zero impressions",
+        "setupSql": "CREATE TABLE campaigns (id INTEGER, clicks INTEGER, impressions INTEGER);\nINSERT INTO campaigns (id, clicks, impressions) VALUES\n  (1, 0, 0),\n  (2, 5, 0),\n  (3, 100, 0);"
+      },
+      {
+        "name": "No zero impressions",
+        "setupSql": "CREATE TABLE campaigns (id INTEGER, clicks INTEGER, impressions INTEGER);\nINSERT INTO campaigns (id, clicks, impressions) VALUES\n  (1, 1, 1000),\n  (2, 50, 200),\n  (3, 75, 75),\n  (4, 0, 500);"
+      },
+      {
+        "name": "Precision matters 3 vs 2 decimals",
+        "setupSql": "CREATE TABLE campaigns (id INTEGER, clicks INTEGER, impressions INTEGER);\nINSERT INTO campaigns (id, clicks, impressions) VALUES\n  (1, 1, 300),\n  (2, 2, 300),\n  (3, 0, 0);"
+      },
+      {
+        "name": "Single row zero impressions",
+        "setupSql": "CREATE TABLE campaigns (id INTEGER, clicks INTEGER, impressions INTEGER);\nINSERT INTO campaigns (id, clicks, impressions) VALUES\n  (1, 7, 0);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT id, clicks, impressions,\n       COALESCE(ROUND(1.0 * clicks / NULLIF(impressions, 0), 2), 0.0) AS ctr\nFROM campaigns\nORDER BY id;",
+      "note": "Rounds to 2 decimal places instead of 3; passes the example because example CTR values happen to match at 2 decimals, but fails on 1/300=0.003 which rounds differently at 2 vs 3 places."
+    }
+  },
+  "nulls-last": {
+    "tests": [
+      {
+        "name": "All NULLs",
+        "setupSql": "CREATE TABLE contacts (name TEXT, last_seen TEXT);\nINSERT INTO contacts (name, last_seen) VALUES\n  ('Alice', NULL),\n  ('Bob', NULL),\n  ('Carol', NULL);"
+      },
+      {
+        "name": "No NULLs",
+        "setupSql": "CREATE TABLE contacts (name TEXT, last_seen TEXT);\nINSERT INTO contacts (name, last_seen) VALUES\n  ('Alice', '2024-01-15'),\n  ('Bob', '2024-03-20'),\n  ('Carol', '2024-02-10'),\n  ('Dan', '2024-04-01');"
+      },
+      {
+        "name": "Single NULL among many dates",
+        "setupSql": "CREATE TABLE contacts (name TEXT, last_seen TEXT);\nINSERT INTO contacts (name, last_seen) VALUES\n  ('Alice', '2024-05-01'),\n  ('Bob', '2024-07-15'),\n  ('Carol', NULL),\n  ('Dan', '2024-03-10'),\n  ('Eve', '2024-09-22');"
+      },
+      {
+        "name": "NULL tie-break reverse alpha order",
+        "setupSql": "CREATE TABLE contacts (name TEXT, last_seen TEXT);\nINSERT INTO contacts (name, last_seen) VALUES\n  ('Zara', NULL),\n  ('Alice', '2024-06-10'),\n  ('Bob', '2024-06-05'),\n  ('Anna', NULL);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT name, last_seen\nFROM contacts\nORDER BY last_seen IS NULL, last_seen DESC, name ASC;",
+      "note": "Adds `name ASC` as a tie-breaker, which matches the example (Max < Pam alphabetically matches insertion order) but diverges when two NULLs are inserted in reverse-alphabetical order (Zara before Anna)."
+    }
+  },
+  "order-by-computed-value": {
+    "tests": [
+      {
+        "name": "Tied values, title breaks tie",
+        "setupSql": "CREATE TABLE books (title TEXT, price REAL, pages INTEGER);\nINSERT INTO books (title, price, pages) VALUES\n  ('Zeta', 100, 300),\n  ('Alpha', 200, 600),\n  ('Mango', 50, 150),\n  ('Kilo', 100, 300);"
+      },
+      {
+        "name": "Single row",
+        "setupSql": "CREATE TABLE books (title TEXT, price REAL, pages INTEGER);\nINSERT INTO books (title, price, pages) VALUES\n  ('Solitary', 99, 297);"
+      },
+      {
+        "name": "Fractional values with 2-decimal precision",
+        "setupSql": "CREATE TABLE books (title TEXT, price REAL, pages INTEGER);\nINSERT INTO books (title, price, pages) VALUES\n  ('Apex', 300, 100),\n  ('Base', 300, 101),\n  ('Core', 300, 102),\n  ('Dune', 300, 103);"
+      },
+      {
+        "name": "All same value, purely alphabetical order",
+        "setupSql": "CREATE TABLE books (title TEXT, price REAL, pages INTEGER);\nINSERT INTO books (title, price, pages) VALUES\n  ('Xenon', 100, 200),\n  ('Apple', 200, 400),\n  ('Mango', 50, 100),\n  ('Berry', 10, 20);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT title,\n       ROUND(CAST(pages AS REAL) / price, 2) AS value\nFROM books\nORDER BY value DESC;",
+      "note": "Missing the title tie-breaker in ORDER BY — when multiple books share the same computed value, the row order is non-deterministic and will differ from the correct ascending-title secondary sort."
+    }
+  },
+  "order-count-per-customer-scalar": {
+    "tests": [
+      {
+        "name": "All customers have zero orders",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers (id, name) VALUES\n  (1, 'Anna'),\n  (2, 'Boris'),\n  (3, 'Clara');\n\nCREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER);"
+      },
+      {
+        "name": "Single customer with many orders",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers (id, name) VALUES\n  (1, 'Zara');\n\nCREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER);\nINSERT INTO orders (id, customer_id, amount) VALUES\n  (1, 1, 10),\n  (2, 1, 20),\n  (3, 1, 30),\n  (4, 1, 40),\n  (5, 1, 50);"
+      },
+      {
+        "name": "Every customer has exactly one order",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers (id, name) VALUES\n  (1, 'Eli'),\n  (2, 'Fay'),\n  (3, 'Gil');\n\nCREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER);\nINSERT INTO orders (id, customer_id, amount) VALUES\n  (1, 1, 100),\n  (2, 2, 200),\n  (3, 3, 300);"
+      },
+      {
+        "name": "Orders with NULL amount — exposes COUNT(col) trap",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers (id, name) VALUES\n  (1, 'Hana'),\n  (2, 'Ivan'),\n  (3, 'Jade');\n\nCREATE TABLE orders (id INTEGER, customer_id INTEGER, amount INTEGER);\nINSERT INTO orders (id, customer_id, amount) VALUES\n  (1, 1, 50),\n  (2, 1, NULL),\n  (3, 2, NULL),\n  (4, 2, NULL);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT\n  c.name AS name,\n  (SELECT COUNT(o.amount) FROM orders o WHERE o.customer_id = c.id) AS order_count\nFROM customers c\nORDER BY c.name;",
+      "note": "Uses COUNT(o.amount) instead of COUNT(*) — silently undercounts orders whose amount is NULL because COUNT(col) ignores NULLs."
+    }
+  },
+  "order-status-count-pivot": {
+    "tests": [
+      {
+        "name": "Single customer, one status only",
+        "setupSql": "CREATE TABLE orders (customer TEXT, status TEXT);\nINSERT INTO orders (customer, status) VALUES\n  ('Dana', 'shipped'), ('Dana', 'shipped'), ('Dana', 'shipped');"
+      },
+      {
+        "name": "Unknown status present",
+        "setupSql": "CREATE TABLE orders (customer TEXT, status TEXT);\nINSERT INTO orders (customer, status) VALUES\n  ('Alice', 'shipped'), ('Alice', 'pending'),\n  ('Bob', 'returned'),\n  ('Carol', 'cancelled'), ('Carol', 'returned'), ('Carol', 'shipped');"
+      },
+      {
+        "name": "All-zero customer mixed with normal",
+        "setupSql": "CREATE TABLE orders (customer TEXT, status TEXT);\nINSERT INTO orders (customer, status) VALUES\n  ('Alpha', 'returned'),\n  ('Beta', 'shipped'), ('Beta', 'pending'), ('Beta', 'cancelled');"
+      },
+      {
+        "name": "Many orders, single status per customer",
+        "setupSql": "CREATE TABLE orders (customer TEXT, status TEXT);\nINSERT INTO orders (customer, status) VALUES\n  ('Eve', 'cancelled'), ('Eve', 'cancelled'), ('Eve', 'cancelled'),\n  ('Frank', 'pending'), ('Frank', 'pending'),\n  ('Grace', 'shipped');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT customer,\n       SUM(CASE WHEN status = 'shipped' THEN 1 ELSE 0 END) AS shipped,\n       SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,\n       SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled\nFROM orders\nWHERE status IN ('shipped', 'pending', 'cancelled')\nGROUP BY customer\nORDER BY customer;",
+      "note": "Adds WHERE status IN (...) which silently drops customers whose only orders have unknown statuses (e.g. 'returned'), excluding them from the result instead of showing all-zero counts."
+    }
+  },
+  "orders-above-overall-average": {
+    "tests": [
+      {
+        "name": "Boundary: amount exactly equals the average",
+        "setupSql": "CREATE TABLE orders (order_id INTEGER, amount INTEGER);\nINSERT INTO orders (order_id, amount) VALUES\n  (1, 10),\n  (2, 20),\n  (3, 30);"
+      },
+      {
+        "name": "All equal amounts: empty result",
+        "setupSql": "CREATE TABLE orders (order_id INTEGER, amount INTEGER);\nINSERT INTO orders (order_id, amount) VALUES\n  (1, 50),\n  (2, 50),\n  (3, 50);"
+      },
+      {
+        "name": "Single row: empty result",
+        "setupSql": "CREATE TABLE orders (order_id INTEGER, amount INTEGER);\nINSERT INTO orders (order_id, amount) VALUES\n  (1, 42);"
+      },
+      {
+        "name": "Negative and zero amounts",
+        "setupSql": "CREATE TABLE orders (order_id INTEGER, amount INTEGER);\nINSERT INTO orders (order_id, amount) VALUES\n  (1, -10),\n  (2, 0),\n  (3, 10),\n  (4, 50);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT order_id AS order_id, amount AS amount\nFROM orders\nWHERE amount >= (SELECT AVG(amount) FROM orders)\nORDER BY amount DESC, order_id;",
+      "note": "Uses >= instead of >, so amounts exactly equal to the average are incorrectly included (exposes the boundary test case where one amount equals the mean)"
+    }
+  },
+  "orders-per-customer": {
+    "tests": [
+      {
+        "name": "NULL customer counts with COUNT(*)",
+        "setupSql": "CREATE TABLE orders (id INTEGER, customer TEXT, amount INTEGER);\nINSERT INTO orders (id, customer, amount) VALUES\n  (1, NULL, 10),\n  (2, NULL, 20),\n  (3, 'Ada', 30),\n  (4, 'Bea', 40);"
+      },
+      {
+        "name": "Single customer all rows",
+        "setupSql": "CREATE TABLE orders (id INTEGER, customer TEXT, amount INTEGER);\nINSERT INTO orders (id, customer, amount) VALUES\n  (1, 'Zoe', 10),\n  (2, 'Zoe', 20),\n  (3, 'Zoe', 30);"
+      },
+      {
+        "name": "All customers one order each, tie-break by name",
+        "setupSql": "CREATE TABLE orders (id INTEGER, customer TEXT, amount INTEGER);\nINSERT INTO orders (id, customer, amount) VALUES\n  (1, 'Charlie', 50),\n  (2, 'Alice', 80),\n  (3, 'Bob', 60);"
+      },
+      {
+        "name": "Multiple ties in count, name tie-break matters",
+        "setupSql": "CREATE TABLE orders (id INTEGER, customer TEXT, amount INTEGER);\nINSERT INTO orders (id, customer, amount) VALUES\n  (1, 'Dana', 10),\n  (2, 'Dana', 20),\n  (3, 'Alex', 30),\n  (4, 'Alex', 40),\n  (5, 'Bea', 50),\n  (6, 'Bea', 60),\n  (7, 'Carl', 70);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT customer, COUNT(customer) AS order_count\nFROM orders\nGROUP BY customer\nORDER BY order_count DESC, customer;",
+      "note": "COUNT(customer) skips NULL customer values, returning 0 instead of the correct row count for the NULL group, so it differs from COUNT(*) when any row has a NULL customer."
+    }
+  },
+  "org-all-reports": {
+    "tests": [
+      {
+        "name": "Deep chain four levels",
+        "setupSql": "CREATE TABLE employees (id INTEGER, name TEXT, manager_id INTEGER);\nINSERT INTO employees (id, name, manager_id) VALUES\n  (1, 'Alice', NULL),\n  (2, 'Bob',   1),\n  (3, 'Carol', 2),\n  (4, 'Dave',  3),\n  (5, 'Eve',   4);"
+      },
+      {
+        "name": "Only one direct report no indirect",
+        "setupSql": "CREATE TABLE employees (id INTEGER, name TEXT, manager_id INTEGER);\nINSERT INTO employees (id, name, manager_id) VALUES\n  (1, 'Alice', NULL),\n  (2, 'Bob',   1);"
+      },
+      {
+        "name": "Name ordering at same depth",
+        "setupSql": "CREATE TABLE employees (id INTEGER, name TEXT, manager_id INTEGER);\nINSERT INTO employees (id, name, manager_id) VALUES\n  (1, 'Alice', NULL),\n  (2, 'Zara',  1),\n  (3, 'Ann',   1),\n  (4, 'Mike',  2),\n  (5, 'Beth',  3);"
+      },
+      {
+        "name": "Empty result no reports",
+        "setupSql": "CREATE TABLE employees (id INTEGER, name TEXT, manager_id INTEGER);\nINSERT INTO employees (id, name, manager_id) VALUES\n  (1, 'Alice', NULL),\n  (2, 'Bob',   NULL),\n  (3, 'Carol', NULL);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT e2.name, 1 AS depth\nFROM employees e1\nJOIN employees e2 ON e2.manager_id = e1.id\nWHERE e1.id = 1\nUNION ALL\nSELECT e3.name, 2\nFROM employees e1\nJOIN employees e2 ON e2.manager_id = e1.id\nJOIN employees e3 ON e3.manager_id = e2.id\nWHERE e1.id = 1\nUNION ALL\nSELECT e4.name, 3\nFROM employees e1\nJOIN employees e2 ON e2.manager_id = e1.id\nJOIN employees e3 ON e3.manager_id = e2.id\nJOIN employees e4 ON e4.manager_id = e3.id\nWHERE e1.id = 1\nORDER BY 2, 1",
+      "note": "Hardcodes exactly three levels of joins instead of using a recursive CTE; misses depth 4 and beyond."
+    }
+  },
+  "paid-vs-unpaid-invoices": {
+    "tests": [
+      {
+        "name": "All-unpaid client gets paid_amount 0",
+        "setupSql": "CREATE TABLE invoices (id INTEGER, client TEXT, status TEXT, amount INTEGER);\nINSERT INTO invoices (id, client, status, amount) VALUES\n  (1, 'Alpha', 'unpaid', 50),\n  (2, 'Alpha', 'unpaid', 30),\n  (3, 'Beta',  'paid',   200),\n  (4, 'Beta',  'unpaid', 80);"
+      },
+      {
+        "name": "All-paid client gets unpaid_count 0",
+        "setupSql": "CREATE TABLE invoices (id INTEGER, client TEXT, status TEXT, amount INTEGER);\nINSERT INTO invoices (id, client, status, amount) VALUES\n  (1, 'Apex',  'paid', 500),\n  (2, 'Apex',  'paid', 300),\n  (3, 'Nadir', 'unpaid', 100),\n  (4, 'Nadir', 'paid',   50);"
+      },
+      {
+        "name": "NULL amount on paid invoice",
+        "setupSql": "CREATE TABLE invoices (id INTEGER, client TEXT, status TEXT, amount INTEGER);\nINSERT INTO invoices (id, client, status, amount) VALUES\n  (1, 'Corp',  'paid',   NULL),\n  (2, 'Corp',  'paid',   400),\n  (3, 'Corp',  'unpaid', 100),\n  (4, 'Delta', 'unpaid', 200);"
+      },
+      {
+        "name": "Single client single invoice each status",
+        "setupSql": "CREATE TABLE invoices (id INTEGER, client TEXT, status TEXT, amount INTEGER);\nINSERT INTO invoices (id, client, status, amount) VALUES\n  (1, 'Solo', 'paid',   999),\n  (2, 'Solo', 'unpaid', 1);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT client,\n       COUNT(CASE WHEN status = 'paid' THEN amount END)   AS paid_count,\n       COUNT(CASE WHEN status = 'unpaid' THEN 1 END) AS unpaid_count,\n       COALESCE(SUM(CASE WHEN status = 'paid' THEN amount END), 0) AS paid_amount\nFROM invoices\nGROUP BY client\nORDER BY client;",
+      "note": "Uses COUNT(amount) instead of COUNT(1) for paid_count, so paid invoices with NULL amount are not counted."
+    }
+  },
+  "pass-rate-per-quiz": {
+    "tests": [
+      {
+        "name": "Score exactly 50 counts as pass",
+        "setupSql": "CREATE TABLE attempts (quiz TEXT, student TEXT, score INTEGER);\nINSERT INTO attempts (quiz, student, score) VALUES\n  ('QA', 'a', 50),\n  ('QA', 'b', 49),\n  ('QB', 'a', 50),\n  ('QB', 'b', 50),\n  ('QB', 'c', 50);"
+      },
+      {
+        "name": "All-pass and all-fail groups",
+        "setupSql": "CREATE TABLE attempts (quiz TEXT, student TEXT, score INTEGER);\nINSERT INTO attempts (quiz, student, score) VALUES\n  ('Alpha', 'a', 90),\n  ('Alpha', 'b', 80),\n  ('Alpha', 'c', 70),\n  ('Beta',  'a', 10),\n  ('Beta',  'b', 20),\n  ('Beta',  'c', 30),\n  ('Gamma', 'a', 55),\n  ('Gamma', 'b', 45);"
+      },
+      {
+        "name": "Tie-breaker by quiz name ascending",
+        "setupSql": "CREATE TABLE attempts (quiz TEXT, student TEXT, score INTEGER);\nINSERT INTO attempts (quiz, student, score) VALUES\n  ('QZ', 'a', 60),\n  ('QZ', 'b', 40),\n  ('QM', 'a', 70),\n  ('QM', 'b', 30),\n  ('QA', 'a', 80),\n  ('QA', 'b', 80),\n  ('QA', 'c', 80),\n  ('QA', 'd', 80);"
+      },
+      {
+        "name": "Single-attempt quizzes",
+        "setupSql": "CREATE TABLE attempts (quiz TEXT, student TEXT, score INTEGER);\nINSERT INTO attempts (quiz, student, score) VALUES\n  ('Solo1', 'a', 100),\n  ('Solo2', 'b', 50),\n  ('Solo3', 'c', 49),\n  ('Solo4', 'd', 0);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT quiz,\n       ROUND(\n         SUM(CASE WHEN score >= 50 THEN 1 ELSE 0 END) * 1.0 / COUNT(*),\n         2\n       ) AS pass_rate\nFROM attempts\nGROUP BY quiz\nORDER BY pass_rate DESC, quiz DESC;",
+      "note": "Uses DESC for the quiz tie-breaker instead of ASC, so quizzes with equal pass_rate appear in reverse alphabetical order — wrong when ties exist."
+    }
+  },
+  "percent-of-category-total": {
+    "tests": [
+      {
+        "name": "Single product in category gets 100%",
+        "setupSql": "CREATE TABLE sales (product TEXT, category TEXT, revenue INTEGER);\nINSERT INTO sales (product, category, revenue) VALUES\n  ('X1', 'X', 500),\n  ('Y1', 'Y', 200),\n  ('Y2', 'Y', 300);"
+      },
+      {
+        "name": "Unequal category totals expose global-sum trap",
+        "setupSql": "CREATE TABLE sales (product TEXT, category TEXT, revenue INTEGER);\nINSERT INTO sales (product, category, revenue) VALUES\n  ('A1', 'A', 10),\n  ('A2', 'A', 90),\n  ('B1', 'B', 40),\n  ('B2', 'B', 60),\n  ('C1', 'C', 100),\n  ('C2', 'C', 100),\n  ('C3', 'C', 100);"
+      },
+      {
+        "name": "Tiny revenue yields rounding to 0.0",
+        "setupSql": "CREATE TABLE sales (product TEXT, category TEXT, revenue INTEGER);\nINSERT INTO sales (product, category, revenue) VALUES\n  ('P1', 'P', 1),\n  ('P2', 'P', 999),\n  ('Q1', 'Q', 500),\n  ('Q2', 'Q', 500);"
+      },
+      {
+        "name": "Three categories with different sizes",
+        "setupSql": "CREATE TABLE sales (product TEXT, category TEXT, revenue INTEGER);\nINSERT INTO sales (product, category, revenue) VALUES\n  ('A1', 'Alpha', 50),\n  ('A2', 'Alpha', 150),\n  ('B1', 'Beta', 80),\n  ('B2', 'Beta', 20),\n  ('B3', 'Beta', 100),\n  ('G1', 'Gamma', 300);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT product, category,\n       ROUND(100.0 * revenue / SUM(revenue) OVER (PARTITION BY category), 0) AS pct\nFROM sales\nORDER BY category, product;",
+      "note": "Rounds to 0 decimal places instead of 1 — passes when all percentages happen to be whole numbers (as in the example: 30, 70, 25, 25, 50) but fails when a category has non-integer percentages like 33.3%."
+    }
+  },
+  "products-priced-above-category-avg": {
+    "tests": [
+      {
+        "name": "Single-item category yields no results",
+        "setupSql": "CREATE TABLE products (id INTEGER, name TEXT, category TEXT, price INTEGER);\nINSERT INTO products (id, name, category, price) VALUES\n  (1, 'Hammer',  'Tools',  50),\n  (2, 'Wrench',  'Tools',  30),\n  (3, 'Drill',   'Tools',  80),\n  (4, 'Gloves',  'Safety', 20);"
+      },
+      {
+        "name": "Price exactly equals category average (strict > boundary)",
+        "setupSql": "CREATE TABLE products (id INTEGER, name TEXT, category TEXT, price INTEGER);\nINSERT INTO products (id, name, category, price) VALUES\n  (1, 'Alpha',   'Electronics', 100),\n  (2, 'Beta',    'Electronics', 200),\n  (3, 'Gamma',   'Electronics', 150),\n  (4, 'Widget',  'Gadgets',     10),\n  (5, 'Doodad',  'Gadgets',     10),\n  (6, 'Gizmo',   'Gadgets',     20);"
+      },
+      {
+        "name": "Single category with multiple products",
+        "setupSql": "CREATE TABLE products (id INTEGER, name TEXT, category TEXT, price INTEGER);\nINSERT INTO products (id, name, category, price) VALUES\n  (1, 'Budget Phone', 'Phones', 200),\n  (2, 'Mid Phone',    'Phones', 500),\n  (3, 'Premium Phone','Phones', 1200),\n  (4, 'Ultra Phone',  'Phones', 1800);"
+      },
+      {
+        "name": "All products above their category averages across many categories",
+        "setupSql": "CREATE TABLE products (id INTEGER, name TEXT, category TEXT, price INTEGER);\nINSERT INTO products (id, name, category, price) VALUES\n  (1, 'Cheap Book',    'Books',    5),\n  (2, 'Pricey Book',   'Books',    15),\n  (3, 'Very Pricey Book','Books',  25),\n  (4, 'Basic Chair',   'Furniture', 100),\n  (5, 'Fancy Chair',   'Furniture', 300),\n  (6, 'Luxury Chair',  'Furniture', 500),\n  (7, 'Small Pot',     'Kitchen',   8),\n  (8, 'Big Pot',       'Kitchen',   20),\n  (9, 'Huge Pot',      'Kitchen',   40);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT p.name AS name, p.category AS category, p.price AS price\nFROM products p\nWHERE p.price >= (\n  SELECT AVG(q.price)\n  FROM products q\n  WHERE q.category = p.category\n)\nORDER BY p.category, p.name;",
+      "note": "Uses >= instead of >, so products priced exactly at the category average are incorrectly included."
+    }
+  },
+  "quarterly-sales-pivot": {
+    "tests": [
+      {
+        "name": "Single product, all quarters",
+        "setupSql": "CREATE TABLE sales (product TEXT, quarter TEXT, amount INTEGER);\nINSERT INTO sales (product, quarter, amount) VALUES\n  ('Alpha', 'Q1', 10), ('Alpha', 'Q2', 20), ('Alpha', 'Q3', 30), ('Alpha', 'Q4', 40);"
+      },
+      {
+        "name": "Multiple rows per product per quarter (sum vs max)",
+        "setupSql": "CREATE TABLE sales (product TEXT, quarter TEXT, amount INTEGER);\nINSERT INTO sales (product, quarter, amount) VALUES\n  ('Widget', 'Q1', 50), ('Widget', 'Q1', 50), ('Widget', 'Q2', 150), ('Widget', 'Q3', 120), ('Widget', 'Q4', 200),\n  ('Gadget', 'Q1', 80), ('Gadget', 'Q2', 45), ('Gadget', 'Q2', 45), ('Gadget', 'Q3', 70), ('Gadget', 'Q4', 110);"
+      },
+      {
+        "name": "All quarters missing for one product",
+        "setupSql": "CREATE TABLE sales (product TEXT, quarter TEXT, amount INTEGER);\nINSERT INTO sales (product, quarter, amount) VALUES\n  ('Alpha', 'Q1', 100), ('Alpha', 'Q2', 200), ('Alpha', 'Q3', 300), ('Alpha', 'Q4', 400),\n  ('Beta', 'Q1', 10), ('Beta', 'Q3', 30);"
+      },
+      {
+        "name": "Many products alphabetical order check",
+        "setupSql": "CREATE TABLE sales (product TEXT, quarter TEXT, amount INTEGER);\nINSERT INTO sales (product, quarter, amount) VALUES\n  ('Zebra', 'Q1', 5), ('Zebra', 'Q4', 15),\n  ('Apple', 'Q2', 25), ('Apple', 'Q3', 35),\n  ('Mango', 'Q1', 7), ('Mango', 'Q2', 8), ('Mango', 'Q3', 9), ('Mango', 'Q4', 10);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT product,\n       MAX(CASE WHEN quarter = 'Q1' THEN amount END) AS q1,\n       MAX(CASE WHEN quarter = 'Q2' THEN amount END) AS q2,\n       MAX(CASE WHEN quarter = 'Q3' THEN amount END) AS q3,\n       MAX(CASE WHEN quarter = 'Q4' THEN amount END) AS q4\nFROM sales\nGROUP BY product\nORDER BY product;",
+      "note": "Uses MAX instead of SUM — correct when each product has exactly one row per quarter (as in the example), but wrong when multiple rows share the same product+quarter (MAX picks only the largest value rather than summing all)."
+    }
+  },
+  "rank-vs-dense-rank": {
+    "tests": [
+      {
+        "name": "All unique scores",
+        "setupSql": "CREATE TABLE scores (player TEXT, score INTEGER);\nINSERT INTO scores (player, score) VALUES\n  ('Alice', 100),\n  ('Bob', 90),\n  ('Carol', 80),\n  ('Dave', 70),\n  ('Eve', 60);"
+      },
+      {
+        "name": "Multiple tie groups",
+        "setupSql": "CREATE TABLE scores (player TEXT, score INTEGER);\nINSERT INTO scores (player, score) VALUES\n  ('Amy', 100),\n  ('Ben', 100),\n  ('Cal', 100),\n  ('Dan', 80),\n  ('Eli', 80),\n  ('Fay', 60);"
+      },
+      {
+        "name": "Single player",
+        "setupSql": "CREATE TABLE scores (player TEXT, score INTEGER);\nINSERT INTO scores (player, score) VALUES\n  ('Solo', 42);"
+      },
+      {
+        "name": "Reverse insertion order ties",
+        "setupSql": "CREATE TABLE scores (player TEXT, score INTEGER);\nINSERT INTO scores (player, score) VALUES\n  ('Zoe', 90),\n  ('Ana', 90),\n  ('Max', 70);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT player, score,\n       RANK()       OVER (ORDER BY score DESC) AS rnk,\n       DENSE_RANK() OVER (ORDER BY score DESC) AS drnk\nFROM scores\nORDER BY score DESC;",
+      "note": "Missing 'player' as a tie-breaker in ORDER BY; output order for tied rows is undefined and may not match alphabetical order expected by the oracle."
+    }
+  },
+  "revenue-by-category": {
+    "tests": [
+      {
+        "name": "Ties on total — secondary sort by category",
+        "setupSql": "CREATE TABLE sales (id INTEGER, category TEXT, amount INTEGER);\nINSERT INTO sales (id, category, amount) VALUES\n  (1, 'Zebra', 100),\n  (2, 'Alpha', 60),\n  (3, 'Alpha', 40),\n  (4, 'Mango', 80),\n  (5, 'Mango', 20);"
+      },
+      {
+        "name": "NULL category forms its own group",
+        "setupSql": "CREATE TABLE sales (id INTEGER, category TEXT, amount INTEGER);\nINSERT INTO sales (id, category, amount) VALUES\n  (1, 'Books', 40),\n  (2, 'Books', 60),\n  (3, NULL, 50),\n  (4, NULL, 30);"
+      },
+      {
+        "name": "Single row per category — avg equals amount",
+        "setupSql": "CREATE TABLE sales (id INTEGER, category TEXT, amount INTEGER);\nINSERT INTO sales (id, category, amount) VALUES\n  (1, 'Hats', 75),\n  (2, 'Bags', 50),\n  (3, 'Shoes', 50);"
+      },
+      {
+        "name": "Non-integer avg requiring ROUND",
+        "setupSql": "CREATE TABLE sales (id INTEGER, category TEXT, amount INTEGER);\nINSERT INTO sales (id, category, amount) VALUES\n  (1, 'Food', 10),\n  (2, 'Food', 20),\n  (3, 'Food', 15),\n  (4, 'Drink', 7),\n  (5, 'Drink', 11);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT category,\n       SUM(amount) AS total,\n       ROUND(AVG(amount), 2) AS avg_amount\nFROM sales\nGROUP BY category\nORDER BY total DESC;",
+      "note": "Omits the secondary ORDER BY category ASC tie-breaker; matches the example (no ties) but returns wrong row order when two categories share the same total."
+    }
+  },
+  "running-maximum-balance": {
+    "tests": [
+      {
+        "name": "Monotonically decreasing balances",
+        "setupSql": "CREATE TABLE balances (day TEXT, balance INTEGER);\nINSERT INTO balances (day, balance) VALUES\n  ('2024-01-01', 500),\n  ('2024-01-02', 400),\n  ('2024-01-03', 300),\n  ('2024-01-04', 200),\n  ('2024-01-05', 100);"
+      },
+      {
+        "name": "Single row",
+        "setupSql": "CREATE TABLE balances (day TEXT, balance INTEGER);\nINSERT INTO balances (day, balance) VALUES\n  ('2024-03-15', 750);"
+      },
+      {
+        "name": "All balances equal",
+        "setupSql": "CREATE TABLE balances (day TEXT, balance INTEGER);\nINSERT INTO balances (day, balance) VALUES\n  ('2024-06-01', 300),\n  ('2024-06-02', 300),\n  ('2024-06-03', 300),\n  ('2024-06-04', 300);"
+      },
+      {
+        "name": "Duplicate days expose ROWS vs RANGE",
+        "setupSql": "CREATE TABLE balances (day TEXT, balance INTEGER);\nINSERT INTO balances (day, balance) VALUES\n  ('2024-07-01', 100),\n  ('2024-07-01', 200),\n  ('2024-07-02', 150);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT\n  day,\n  balance,\n  MAX(balance) OVER (ORDER BY day ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_max\nFROM balances\nORDER BY day;",
+      "note": "Uses ROWS instead of the default RANGE frame; produces wrong running_max for the earlier row when two entries share the same day (ROWS sees only prior physical rows, RANGE includes all rows with the same day value)."
+    }
+  },
+  "running-total-of-sales": {
+    "tests": [
+      {
+        "name": "Single row",
+        "setupSql": "CREATE TABLE sales (day TEXT, amount INTEGER);\nINSERT INTO sales (day, amount) VALUES\n  ('2024-01-01', 42);"
+      },
+      {
+        "name": "Duplicate day same amount",
+        "setupSql": "CREATE TABLE sales (day TEXT, amount INTEGER);\nINSERT INTO sales (day, amount) VALUES\n  ('2024-01-01', 30),\n  ('2024-01-01', 30),\n  ('2024-01-02', 20);"
+      },
+      {
+        "name": "Negative amounts",
+        "setupSql": "CREATE TABLE sales (day TEXT, amount INTEGER);\nINSERT INTO sales (day, amount) VALUES\n  ('2024-02-01', 200),\n  ('2024-02-02', -50),\n  ('2024-02-03', 100),\n  ('2024-02-04', -30);"
+      },
+      {
+        "name": "Descending amounts",
+        "setupSql": "CREATE TABLE sales (day TEXT, amount INTEGER);\nINSERT INTO sales (day, amount) VALUES\n  ('2024-05-01', 500),\n  ('2024-05-02', 300),\n  ('2024-05-03', 100),\n  ('2024-05-04', 50);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT day, amount,\n       SUM(amount) OVER (ORDER BY day ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_total\nFROM sales\nORDER BY day;",
+      "note": "Uses ROWS frame instead of the default RANGE frame — gives wrong (non-equal) running totals for rows that share the same day value"
+    }
+  },
+  "score-quartiles": {
+    "tests": [
+      {
+        "name": "Uneven distribution (9 rows)",
+        "setupSql": "CREATE TABLE students (name TEXT, score INTEGER);\nINSERT INTO students (name, score) VALUES\n  ('Ann', 10),\n  ('Bob', 20),\n  ('Cat', 30),\n  ('Dan', 40),\n  ('Eve', 50),\n  ('Fox', 60),\n  ('Gil', 70),\n  ('Hao', 80),\n  ('Ivy', 90);"
+      },
+      {
+        "name": "Exactly one per quartile (4 rows)",
+        "setupSql": "CREATE TABLE students (name TEXT, score INTEGER);\nINSERT INTO students (name, score) VALUES\n  ('Ada', 10),\n  ('Bea', 40),\n  ('Cus', 70),\n  ('Dot', 99);"
+      },
+      {
+        "name": "Tied scores all within buckets",
+        "setupSql": "CREATE TABLE students (name TEXT, score INTEGER);\nINSERT INTO students (name, score) VALUES\n  ('Abe', 50),\n  ('Ben', 50),\n  ('Cal', 75),\n  ('Dan', 75),\n  ('Eve', 90),\n  ('Flo', 90),\n  ('Guy', 100),\n  ('Hak', 100);"
+      },
+      {
+        "name": "Ties straddling quartile boundary",
+        "setupSql": "CREATE TABLE students (name TEXT, score INTEGER);\nINSERT INTO students (name, score) VALUES\n  ('Zed', 50),\n  ('Bob', 50),\n  ('Amy', 50),\n  ('Dan', 80),\n  ('Eve', 95);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT name, score,\n       NTILE(4) OVER (ORDER BY score, name) AS quartile\nFROM students\nORDER BY score, name;",
+      "note": "Adds name as a tie-breaker inside NTILE window; matches the oracle when all scores are unique but assigns different rows to different buckets when tied scores are inserted in non-alphabetical order."
+    }
+  },
+  "second-highest-no-limit": {
+    "tests": [
+      {
+        "name": "Ties at the top with clear second",
+        "setupSql": "CREATE TABLE salaries (employee TEXT, amount INTEGER);\nINSERT INTO salaries (employee, amount) VALUES\n  ('a', 1000),\n  ('b', 1000),\n  ('c', 1000),\n  ('d', 500),\n  ('e', 200);"
+      },
+      {
+        "name": "Ties at second highest",
+        "setupSql": "CREATE TABLE salaries (employee TEXT, amount INTEGER);\nINSERT INTO salaries (employee, amount) VALUES\n  ('a', 1000),\n  ('b', 700),\n  ('c', 700),\n  ('d', 400);"
+      },
+      {
+        "name": "Negative and zero salaries",
+        "setupSql": "CREATE TABLE salaries (employee TEXT, amount INTEGER);\nINSERT INTO salaries (employee, amount) VALUES\n  ('a', 0),\n  ('b', -10),\n  ('c', -20),\n  ('d', -10);"
+      },
+      {
+        "name": "Only two distinct values — second is also the minimum",
+        "setupSql": "CREATE TABLE salaries (employee TEXT, amount INTEGER);\nINSERT INTO salaries (employee, amount) VALUES\n  ('a', 800),\n  ('b', 800),\n  ('c', 300),\n  ('d', 300);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT MAX(amount) AS second_highest\nFROM salaries\nWHERE amount < (SELECT MAX(amount) FROM salaries)\nAND amount != (SELECT MIN(amount) FROM salaries);",
+      "note": "Adds an extra filter excluding the minimum, which incorrectly returns NULL when there are only two distinct salary values and the second-highest is also the minimum."
+    }
+  },
+  "signup-funnel-conversion": {
+    "tests": [
+      {
+        "name": "Duplicate rows per user",
+        "setupSql": "CREATE TABLE visits (user_id INTEGER);\nCREATE TABLE carts  (user_id INTEGER);\nCREATE TABLE buys   (user_id INTEGER);\nINSERT INTO visits (user_id) VALUES (1),(1),(2),(2),(3),(3),(4),(4),(5),(5);\nINSERT INTO carts  (user_id) VALUES (1),(1),(2),(2),(3),(3);\nINSERT INTO buys   (user_id) VALUES (1),(1),(2),(2);"
+      },
+      {
+        "name": "NULL user_ids mixed in",
+        "setupSql": "CREATE TABLE visits (user_id INTEGER);\nCREATE TABLE carts  (user_id INTEGER);\nCREATE TABLE buys   (user_id INTEGER);\nINSERT INTO visits (user_id) VALUES (1),(2),(3),(4),(NULL),(NULL);\nINSERT INTO carts  (user_id) VALUES (1),(2),(NULL);\nINSERT INTO buys   (user_id) VALUES (1),(NULL);"
+      },
+      {
+        "name": "Single user all stages",
+        "setupSql": "CREATE TABLE visits (user_id INTEGER);\nCREATE TABLE carts  (user_id INTEGER);\nCREATE TABLE buys   (user_id INTEGER);\nINSERT INTO visits (user_id) VALUES (42);\nINSERT INTO carts  (user_id) VALUES (42);\nINSERT INTO buys   (user_id) VALUES (42);"
+      },
+      {
+        "name": "No purchases at all",
+        "setupSql": "CREATE TABLE visits (user_id INTEGER);\nCREATE TABLE carts  (user_id INTEGER);\nCREATE TABLE buys   (user_id INTEGER);\nINSERT INTO visits (user_id) VALUES (1),(2),(3),(4),(5),(6),(7),(8),(9),(10);\nINSERT INTO carts  (user_id) VALUES (1),(2),(3),(4),(5);\n-- buys is empty"
+      }
+    ],
+    "trap": {
+      "sql": "WITH\n  v AS (SELECT COUNT(*) AS n FROM visits),\n  c AS (SELECT COUNT(*) AS n FROM carts),\n  b AS (SELECT COUNT(*) AS n FROM buys)\nSELECT\n  v.n AS visitors,\n  c.n AS carts,\n  b.n AS purchases,\n  ROUND(c.n * 100.0 / v.n, 1) AS visit_to_cart_pct,\n  ROUND(b.n * 100.0 / c.n, 1) AS cart_to_purchase_pct\nFROM v, c, b;",
+      "note": "Uses COUNT(*) instead of COUNT(DISTINCT user_id), matching the example only because each user appears exactly once there; fails when users have duplicate rows."
+    }
+  },
+  "size-color-product-matrix": {
+    "tests": [
+      {
+        "name": "Single size",
+        "setupSql": "CREATE TABLE sizes (size TEXT);\nINSERT INTO sizes VALUES ('M');\nCREATE TABLE colors (color TEXT);\nINSERT INTO colors VALUES ('Blue'), ('Green'), ('Red');"
+      },
+      {
+        "name": "Single color",
+        "setupSql": "CREATE TABLE sizes (size TEXT);\nINSERT INTO sizes VALUES ('L'), ('M'), ('S'), ('XL');\nCREATE TABLE colors (color TEXT);\nINSERT INTO colors VALUES ('Black');"
+      },
+      {
+        "name": "Duplicate sizes — exposes DISTINCT trap",
+        "setupSql": "CREATE TABLE sizes (size TEXT);\nINSERT INTO sizes VALUES ('M'), ('M'), ('L');\nCREATE TABLE colors (color TEXT);\nINSERT INTO colors VALUES ('Blue'), ('Red');"
+      },
+      {
+        "name": "More colors than sizes",
+        "setupSql": "CREATE TABLE sizes (size TEXT);\nINSERT INTO sizes VALUES ('L'), ('S');\nCREATE TABLE colors (color TEXT);\nINSERT INTO colors VALUES ('Black'), ('Blue'), ('Green'), ('Red'), ('White');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT DISTINCT s.size AS size, c.color AS color\nFROM sizes s\nCROSS JOIN colors c\nORDER BY size, color;",
+      "note": "DISTINCT silently collapses duplicate rows when sizes (or colors) contains repeated values, producing fewer rows than the true Cartesian product."
+    }
+  },
+  "skill-presence-matrix": {
+    "tests": [
+      {
+        "name": "All zeros — person with no skills",
+        "setupSql": "CREATE TABLE people (person TEXT);\nINSERT INTO people (person) VALUES ('Alice'), ('Bob'), ('Zara');\nCREATE TABLE person_skill (person TEXT, skill TEXT);\nINSERT INTO person_skill (person, skill) VALUES\n  ('Alice', 'sql'), ('Alice', 'python'), ('Alice', 'excel'),\n  ('Bob', 'python');"
+      },
+      {
+        "name": "Duplicate skill rows — same skill listed twice",
+        "setupSql": "CREATE TABLE people (person TEXT);\nINSERT INTO people (person) VALUES ('Dan'), ('Eve');\nCREATE TABLE person_skill (person TEXT, skill TEXT);\nINSERT INTO person_skill (person, skill) VALUES\n  ('Dan', 'sql'), ('Dan', 'sql'), ('Dan', 'python'),\n  ('Eve', 'excel'), ('Eve', 'excel');"
+      },
+      {
+        "name": "Single person with all three skills",
+        "setupSql": "CREATE TABLE people (person TEXT);\nINSERT INTO people (person) VALUES ('Solo');\nCREATE TABLE person_skill (person TEXT, skill TEXT);\nINSERT INTO person_skill (person, skill) VALUES\n  ('Solo', 'sql'), ('Solo', 'python'), ('Solo', 'excel');"
+      },
+      {
+        "name": "All people have no skills — completely empty person_skill",
+        "setupSql": "CREATE TABLE people (person TEXT);\nINSERT INTO people (person) VALUES ('Foo'), ('Bar'), ('Baz');\nCREATE TABLE person_skill (person TEXT, skill TEXT);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT p.person,\n       SUM(CASE WHEN s.skill = 'sql' THEN 1 ELSE 0 END) AS sql,\n       SUM(CASE WHEN s.skill = 'python' THEN 1 ELSE 0 END) AS python,\n       SUM(CASE WHEN s.skill = 'excel' THEN 1 ELSE 0 END) AS excel\nFROM people p\nLEFT JOIN person_skill s ON s.person = p.person\nGROUP BY p.person\nORDER BY p.person;",
+      "note": "Uses SUM instead of MAX — matches the example (no duplicate rows) but returns counts > 1 when duplicate skill rows exist for a person."
+    }
+  },
+  "spend-per-customer-three-tables": {
+    "tests": [
+      {
+        "name": "Tie in total_spent — tie-breaker by name",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers VALUES\n  (1, 'Zara'), (2, 'Adam'), (3, 'Milo');\nCREATE TABLE orders (id INTEGER, customer_id INTEGER);\nINSERT INTO orders VALUES\n  (1, 1), (2, 2), (3, 3);\nCREATE TABLE order_items (order_id INTEGER, product TEXT, qty INTEGER, price INTEGER);\nINSERT INTO order_items VALUES\n  (1, 'Widget', 5, 10),\n  (2, 'Gadget', 5, 10),\n  (3, 'Thingamajig', 10, 5);"
+      },
+      {
+        "name": "Duplicate customer names — same name different IDs",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers VALUES\n  (1, 'Alex'), (2, 'Alex'), (3, 'Sam');\nCREATE TABLE orders (id INTEGER, customer_id INTEGER);\nINSERT INTO orders VALUES\n  (10, 1), (11, 2), (12, 3);\nCREATE TABLE order_items (order_id INTEGER, product TEXT, qty INTEGER, price INTEGER);\nINSERT INTO order_items VALUES\n  (10, 'Pen', 2, 5),\n  (11, 'Book', 3, 10),\n  (12, 'Mug', 1, 20);"
+      },
+      {
+        "name": "Single customer multiple orders",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers VALUES\n  (1, 'Dana');\nCREATE TABLE orders (id INTEGER, customer_id INTEGER);\nINSERT INTO orders VALUES\n  (100, 1), (101, 1), (102, 1);\nCREATE TABLE order_items (order_id INTEGER, product TEXT, qty INTEGER, price INTEGER);\nINSERT INTO order_items VALUES\n  (100, 'Apple', 3, 2),\n  (101, 'Bread', 2, 5),\n  (102, 'Candy', 10, 1);"
+      },
+      {
+        "name": "Many customers varied spend",
+        "setupSql": "CREATE TABLE customers (id INTEGER, name TEXT);\nINSERT INTO customers VALUES\n  (1, 'Alice'), (2, 'Bob'), (3, 'Carol'), (4, 'Dave');\nCREATE TABLE orders (id INTEGER, customer_id INTEGER);\nINSERT INTO orders VALUES\n  (1, 1), (2, 1), (3, 2), (4, 3), (5, 4), (6, 4);\nCREATE TABLE order_items (order_id INTEGER, product TEXT, qty INTEGER, price INTEGER);\nINSERT INTO order_items VALUES\n  (1, 'A', 1, 100),\n  (2, 'B', 2, 50),\n  (3, 'C', 3, 30),\n  (4, 'D', 1, 5),\n  (5, 'E', 4, 10),\n  (6, 'F', 2, 20);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT c.name AS customer, SUM(oi.qty * oi.price) AS total_spent\nFROM customers c\nJOIN orders o ON o.customer_id = c.id\nJOIN order_items oi ON oi.order_id = o.id\nGROUP BY c.name\nORDER BY total_spent DESC, customer;",
+      "note": "Groups by c.name only instead of c.id, c.name — silently merges two customers who share the same name into one row, producing a wrong combined total."
+    }
+  },
+  "split-csv-tags": {
+    "tests": [
+      {
+        "name": "Single tag, no comma",
+        "setupSql": "CREATE TABLE posts (id INTEGER, tags TEXT);\nINSERT INTO posts (id, tags) VALUES\n  (1, 'onlytag'),\n  (2, 'other');"
+      },
+      {
+        "name": "Two tags",
+        "setupSql": "CREATE TABLE posts (id INTEGER, tags TEXT);\nINSERT INTO posts (id, tags) VALUES\n  (1, 'foo,bar'),\n  (2, 'baz');"
+      },
+      {
+        "name": "Five tags",
+        "setupSql": "CREATE TABLE posts (id INTEGER, tags TEXT);\nINSERT INTO posts (id, tags) VALUES\n  (1, 'a,b,c,d,e'),\n  (2, 'x');"
+      },
+      {
+        "name": "Tags with spaces in values",
+        "setupSql": "CREATE TABLE posts (id INTEGER, tags TEXT);\nINSERT INTO posts (id, tags) VALUES\n  (1, 'tag one,tag two,tag three'),\n  (2, 'solo tag');"
+      }
+    ],
+    "trap": {
+      "sql": "WITH RECURSIVE split(pos, item, rest) AS (\n  SELECT\n    1,\n    SUBSTR(tags, 1, INSTR(tags, ',') - 1),\n    SUBSTR(tags, INSTR(tags, ',') + 1)\n  FROM posts WHERE id = 1 AND INSTR(tags, ',') > 0\n  UNION ALL\n  SELECT\n    pos + 1,\n    CASE WHEN INSTR(rest, ',') = 0 THEN rest\n         ELSE SUBSTR(rest, 1, INSTR(rest, ',') - 1) END,\n    CASE WHEN INSTR(rest, ',') = 0 THEN ''\n         ELSE SUBSTR(rest, INSTR(rest, ',') + 1) END\n  FROM split\n  WHERE rest <> ''\n)\nSELECT pos AS position, item AS tag\nFROM split\nORDER BY pos;",
+      "note": "The anchor row filters with INSTR(tags, ',') > 0, so a post with only one tag (no comma) returns no rows instead of the single tag at position 1."
+    }
+  },
+  "tags-per-post-ordered": {
+    "tests": [
+      {
+        "name": "Single tag per post",
+        "setupSql": "CREATE TABLE post_tags (post_id INTEGER, name TEXT);\nINSERT INTO post_tags (post_id, name) VALUES\n  (1, 'alpha'),\n  (2, 'beta'),\n  (3, 'gamma'),\n  (4, 'delta');"
+      },
+      {
+        "name": "Many tags on one post needing sort",
+        "setupSql": "CREATE TABLE post_tags (post_id INTEGER, name TEXT);\nINSERT INTO post_tags (post_id, name) VALUES\n  (1, 'zoo'),\n  (1, 'apple'),\n  (1, 'mango'),\n  (1, 'banana'),\n  (1, 'cherry'),\n  (2, 'sql'),\n  (2, 'nosql');"
+      },
+      {
+        "name": "Tags that are prefixes of each other",
+        "setupSql": "CREATE TABLE post_tags (post_id INTEGER, name TEXT);\nINSERT INTO post_tags (post_id, name) VALUES\n  (1, 'abcd'),\n  (1, 'ab'),\n  (1, 'a'),\n  (1, 'abc'),\n  (2, 'x'),\n  (2, 'xy'),\n  (2, 'xyz');"
+      },
+      {
+        "name": "Mixed-case tags expose case-sensitive sort",
+        "setupSql": "CREATE TABLE post_tags (post_id INTEGER, name TEXT);\nINSERT INTO post_tags (post_id, name) VALUES\n  (1, 'Zebra'),\n  (1, 'apple'),\n  (1, 'Mango'),\n  (2, 'SQL'),\n  (2, 'data'),\n  (2, 'DB');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT post_id, group_concat(name, ',') AS tags\nFROM (SELECT post_id, name FROM post_tags ORDER BY post_id, name COLLATE NOCASE)\nGROUP BY post_id\nORDER BY post_id;",
+      "note": "Uses COLLATE NOCASE for sorting, which matches case-insensitive alphabetical order but differs from the oracle's default case-sensitive ordering when tags contain mixed-case names (uppercase letters sort before lowercase in SQLite's default collation)."
+    }
+  },
+  "three-day-moving-average": {
+    "tests": [
+      {
+        "name": "Single row",
+        "setupSql": "CREATE TABLE sales (day TEXT, amount INTEGER);\nINSERT INTO sales (day, amount) VALUES\n  ('2024-01-01', 42);"
+      },
+      {
+        "name": "Two rows only",
+        "setupSql": "CREATE TABLE sales (day TEXT, amount INTEGER);\nINSERT INTO sales (day, amount) VALUES\n  ('2024-05-10', 100),\n  ('2024-05-11', 200);"
+      },
+      {
+        "name": "All same amount",
+        "setupSql": "CREATE TABLE sales (day TEXT, amount INTEGER);\nINSERT INTO sales (day, amount) VALUES\n  ('2024-06-01', 50),\n  ('2024-06-02', 50),\n  ('2024-06-03', 50),\n  ('2024-06-04', 50);"
+      },
+      {
+        "name": "Fractional averages expose wrong rounding",
+        "setupSql": "CREATE TABLE sales (day TEXT, amount INTEGER);\nINSERT INTO sales (day, amount) VALUES\n  ('2024-01-01', 10),\n  ('2024-01-02', 20),\n  ('2024-01-03', 31),\n  ('2024-01-04', 40),\n  ('2024-01-05', 50);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT day,\n       ROUND(AVG(amount) OVER (\n         ORDER BY day ROWS BETWEEN 2 PRECEDING AND CURRENT ROW\n       ), 0) AS mov_avg\nFROM sales\nORDER BY day;",
+      "note": "Rounds to 0 decimal places instead of 2; passes when all 3-row window averages happen to be whole numbers (as in the example with amounts 10,20,30,40,50,60) but truncates fractional averages like 20.33 to 20 when amounts don't divide evenly."
+    }
+  },
+  "top-2-per-category": {
+    "tests": [
+      {
+        "name": "Tie at rank 2 within a category",
+        "setupSql": "CREATE TABLE sales (category TEXT, product TEXT, revenue INTEGER);\nINSERT INTO sales (category, product, revenue) VALUES\n  ('Tech', 'Laptop', 1200),\n  ('Tech', 'Phone', 900),\n  ('Tech', 'Watch', 900),\n  ('Home', 'Sofa', 700),\n  ('Home', 'Lamp', 150),\n  ('Home', 'Rug', 300);"
+      },
+      {
+        "name": "Single product in one category",
+        "setupSql": "CREATE TABLE sales (category TEXT, product TEXT, revenue INTEGER);\nINSERT INTO sales (category, product, revenue) VALUES\n  ('Tech', 'Laptop', 1200),\n  ('Tech', 'Phone', 900),\n  ('Solo', 'Widget', 500),\n  ('Home', 'Sofa', 700),\n  ('Home', 'Rug', 300);"
+      },
+      {
+        "name": "All same revenue in one category",
+        "setupSql": "CREATE TABLE sales (category TEXT, product TEXT, revenue INTEGER);\nINSERT INTO sales (category, product, revenue) VALUES\n  ('Tech', 'Alpha', 600),\n  ('Tech', 'Beta', 600),\n  ('Tech', 'Gamma', 600),\n  ('Home', 'Sofa', 700),\n  ('Home', 'Lamp', 200),\n  ('Home', 'Rug', 300);"
+      },
+      {
+        "name": "Tie at rank 1 across multiple categories",
+        "setupSql": "CREATE TABLE sales (category TEXT, product TEXT, revenue INTEGER);\nINSERT INTO sales (category, product, revenue) VALUES\n  ('Food', 'Bread', 500),\n  ('Food', 'Milk', 500),\n  ('Food', 'Eggs', 200),\n  ('Gear', 'Tent', 800),\n  ('Gear', 'Rope', 800),\n  ('Gear', 'Axe', 300);"
+      }
+    ],
+    "trap": {
+      "sql": "WITH ranked AS (\n  SELECT category, product, revenue,\n         RANK() OVER (PARTITION BY category ORDER BY revenue DESC) AS rk\n  FROM sales\n)\nSELECT category, product, revenue\nFROM ranked\nWHERE rk <= 2\nORDER BY category, revenue DESC;",
+      "note": "Uses RANK() instead of ROW_NUMBER(): on the example data there are no ties so both produce identical results, but when two products share rank-2 revenue RANK() returns both while ROW_NUMBER() returns exactly one — exposing the tie-at-rank-2 edge case."
+    }
+  },
+  "top-scorers-with-ties": {
+    "tests": [
+      {
+        "name": "Ties at rank 3 boundary — LIMIT 3 cuts them off",
+        "setupSql": "CREATE TABLE players (player TEXT, points INTEGER);\nINSERT INTO players (player, points) VALUES\n  ('Ada',  100),\n  ('Ben',   90),\n  ('Cal',   80),\n  ('Dee',   80),\n  ('Eve',   80),\n  ('Fox',   70);"
+      },
+      {
+        "name": "All players tie for rank 1",
+        "setupSql": "CREATE TABLE players (player TEXT, points INTEGER);\nINSERT INTO players (player, points) VALUES\n  ('Ann',  50),\n  ('Bob',  50),\n  ('Cat',  50),\n  ('Dan',  50);"
+      },
+      {
+        "name": "Exactly 3 distinct score levels, no ties",
+        "setupSql": "CREATE TABLE players (player TEXT, points INTEGER);\nINSERT INTO players (player, points) VALUES\n  ('Abe',  95),\n  ('Bea',  85),\n  ('Cam',  75),\n  ('Dot',  65),\n  ('Eli',  55);"
+      },
+      {
+        "name": "Tie at rank 2 causes RANK to skip to 4 — rank 3 never exists",
+        "setupSql": "CREATE TABLE players (player TEXT, points INTEGER);\nINSERT INTO players (player, points) VALUES\n  ('Fay',  100),\n  ('Gil',   90),\n  ('Hal',   90),\n  ('Ivy',   80),\n  ('Jay',   70);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT player, points, RANK() OVER (ORDER BY points DESC) AS rnk\nFROM players\nORDER BY rnk, player\nLIMIT 3;",
+      "note": "Uses LIMIT 3 instead of WHERE rnk <= 3 — returns exactly 3 rows even when more players are tied at rank 3 (or rank 2 with a tie causing rank 3 to jump)."
+    }
+  },
+  "two-dimension-pivot": {
+    "tests": [
+      {
+        "name": "Duplicate unit values in same store-quarter expose SUM DISTINCT trap",
+        "setupSql": "CREATE TABLE sales2d (store TEXT, quarter TEXT, product TEXT, units INTEGER);\nINSERT INTO sales2d (store, quarter, product, units) VALUES\n  ('X', 'Q1', 'pen', 10), ('X', 'Q1', 'ink', 10), ('X', 'Q1', 'paper', 5),\n  ('X', 'Q2', 'pen', 8),\n  ('X', 'Q3', 'pen', 6), ('X', 'Q3', 'ink', 6),\n  ('X', 'Q4', 'pen', 3);"
+      },
+      {
+        "name": "Store with missing quarters yields NULL not zero",
+        "setupSql": "CREATE TABLE sales2d (store TEXT, quarter TEXT, product TEXT, units INTEGER);\nINSERT INTO sales2d (store, quarter, product, units) VALUES\n  ('Alpha', 'Q1', 'pen', 100),\n  ('Beta',  'Q3', 'pen', 50),\n  ('Beta',  'Q4', 'ink', 25),\n  ('Gamma', 'Q2', 'pen', 10);"
+      },
+      {
+        "name": "Single store all four quarters one product each",
+        "setupSql": "CREATE TABLE sales2d (store TEXT, quarter TEXT, product TEXT, units INTEGER);\nINSERT INTO sales2d (store, quarter, product, units) VALUES\n  ('Solo', 'Q1', 'widget', 1),\n  ('Solo', 'Q2', 'widget', 2),\n  ('Solo', 'Q3', 'widget', 3),\n  ('Solo', 'Q4', 'widget', 4);"
+      },
+      {
+        "name": "Many stores with heavy multi-product per quarter aggregation",
+        "setupSql": "CREATE TABLE sales2d (store TEXT, quarter TEXT, product TEXT, units INTEGER);\nINSERT INTO sales2d (store, quarter, product, units) VALUES\n  ('P', 'Q1', 'a', 1), ('P', 'Q1', 'b', 2), ('P', 'Q1', 'c', 3),\n  ('P', 'Q2', 'a', 4), ('P', 'Q2', 'b', 5),\n  ('P', 'Q3', 'a', 6),\n  ('Q', 'Q1', 'a', 10), ('Q', 'Q1', 'b', 11),\n  ('Q', 'Q2', 'a', 12), ('Q', 'Q2', 'b', 13), ('Q', 'Q2', 'c', 14),\n  ('Q', 'Q3', 'a', 15), ('Q', 'Q3', 'b', 16),\n  ('Q', 'Q4', 'a', 17),\n  ('R', 'Q4', 'a', 99);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT store,\n       SUM(DISTINCT CASE WHEN quarter = 'Q1' THEN units END) AS q1,\n       SUM(DISTINCT CASE WHEN quarter = 'Q2' THEN units END) AS q2,\n       SUM(DISTINCT CASE WHEN quarter = 'Q3' THEN units END) AS q3,\n       SUM(DISTINCT CASE WHEN quarter = 'Q4' THEN units END) AS q4\nFROM sales2d\nGROUP BY store\nORDER BY store;",
+      "note": "Uses SUM(DISTINCT ...) instead of SUM — silently deduplicates equal unit values, giving wrong totals when two products in the same store-quarter happen to have identical unit counts."
+    }
+  },
+  "union-all-vs-union-duplicates": {
+    "tests": [
+      {
+        "name": "No cross-table overlap — all_count equals distinct_count",
+        "setupSql": "CREATE TABLE web_logins (user TEXT);\nINSERT INTO web_logins (user) VALUES\n  ('Alice'), ('Bob'), ('Carol');\n\nCREATE TABLE app_logins (user TEXT);\nINSERT INTO app_logins (user) VALUES\n  ('Dave'), ('Eve'), ('Frank');"
+      },
+      {
+        "name": "Complete overlap — both tables identical users",
+        "setupSql": "CREATE TABLE web_logins (user TEXT);\nINSERT INTO web_logins (user) VALUES\n  ('Ana'), ('Ben'), ('Cam');\n\nCREATE TABLE app_logins (user TEXT);\nINSERT INTO app_logins (user) VALUES\n  ('Ana'), ('Ben'), ('Cam');"
+      },
+      {
+        "name": "Heavy intra-table duplicates",
+        "setupSql": "CREATE TABLE web_logins (user TEXT);\nINSERT INTO web_logins (user) VALUES\n  ('Zoe'), ('Zoe'), ('Zoe'), ('Zoe'), ('Max');\n\nCREATE TABLE app_logins (user TEXT);\nINSERT INTO app_logins (user) VALUES\n  ('Zoe'), ('Max'), ('Max');"
+      },
+      {
+        "name": "One table empty",
+        "setupSql": "CREATE TABLE web_logins (user TEXT);\nINSERT INTO web_logins (user) VALUES\n  ('Nia'), ('Leo'), ('Nia');\n\nCREATE TABLE app_logins (user TEXT);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT\n  (SELECT COUNT(*) FROM (SELECT user FROM web_logins UNION ALL SELECT user FROM app_logins)) AS all_count,\n  (SELECT COUNT(*) FROM web_logins) AS distinct_count;",
+      "note": "Uses COUNT(*) FROM web_logins as distinct_count — happens to equal 4 on the example dataset, but does not compute distinct users across both tables; fails whenever web_logins row count differs from the true union-distinct count."
+    }
+  },
+  "unpivot-scores": {
+    "tests": [
+      {
+        "name": "Single student",
+        "setupSql": "CREATE TABLE report (student TEXT, math INTEGER, science INTEGER, english INTEGER);\nINSERT INTO report (student, math, science, english) VALUES\n  ('Zoe', 100, 95, 80);"
+      },
+      {
+        "name": "NULL score",
+        "setupSql": "CREATE TABLE report (student TEXT, math INTEGER, science INTEGER, english INTEGER);\nINSERT INTO report (student, math, science, english) VALUES\n  ('Ana', 70, NULL, 85),\n  ('Ben', NULL, 60, 90);"
+      },
+      {
+        "name": "Identical score rows expose UNION dedup",
+        "setupSql": "CREATE TABLE report (student TEXT, math INTEGER, science INTEGER, english INTEGER);\nINSERT INTO report (student, math, science, english) VALUES\n  ('Kim', 70, 70, 70),\n  ('Kim', 70, 70, 70);"
+      },
+      {
+        "name": "Many students alphabetical order",
+        "setupSql": "CREATE TABLE report (student TEXT, math INTEGER, science INTEGER, english INTEGER);\nINSERT INTO report (student, math, science, english) VALUES\n  ('Zara', 55, 65, 75),\n  ('Anna', 90, 80, 70),\n  ('Mike', 40, 50, 60);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT student, 'math' AS subject, math AS score FROM report\nUNION\nSELECT student, 'science' AS subject, science AS score FROM report\nUNION\nSELECT student, 'english' AS subject, english AS score FROM report\nORDER BY student, subject;",
+      "note": "Uses UNION instead of UNION ALL — silently deduplicates rows that are identical (e.g. two students with the same name and same scores), returning fewer rows than expected."
+    }
+  },
+  "warmer-than-the-previous-day": {
+    "tests": [
+      {
+        "name": "Single row - empty result",
+        "setupSql": "CREATE TABLE weather (id INTEGER, recorded_on TEXT, temperature INTEGER);\nINSERT INTO weather VALUES\n  (1, '2024-03-15', 25);"
+      },
+      {
+        "name": "Two rows only second qualifies",
+        "setupSql": "CREATE TABLE weather (id INTEGER, recorded_on TEXT, temperature INTEGER);\nINSERT INTO weather VALUES\n  (1, '2024-02-10', 15),\n  (2, '2024-02-11', 18);"
+      },
+      {
+        "name": "Equal temperatures not warmer",
+        "setupSql": "CREATE TABLE weather (id INTEGER, recorded_on TEXT, temperature INTEGER);\nINSERT INTO weather VALUES\n  (1, '2024-05-01', 22),\n  (2, '2024-05-02', 22),\n  (3, '2024-05-03', 25),\n  (4, '2024-05-04', 25),\n  (5, '2024-05-05', 20);"
+      },
+      {
+        "name": "All ascending - all but first qualify",
+        "setupSql": "CREATE TABLE weather (id INTEGER, recorded_on TEXT, temperature INTEGER);\nINSERT INTO weather VALUES\n  (1, '2024-07-01', 10),\n  (2, '2024-07-02', 15),\n  (3, '2024-07-03', 20),\n  (4, '2024-07-04', 25),\n  (5, '2024-07-05', 30);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT today.recorded_on AS recorded_on\nFROM weather today\nJOIN weather yest\n  ON yest.recorded_on = date(today.recorded_on, '-1 day')\nWHERE today.temperature >= yest.temperature\nORDER BY recorded_on;",
+      "note": "Uses >= instead of > so days with equal temperature to the prior day are incorrectly included as 'warmer'."
+    }
+  },
+  "weekend-events": {
+    "tests": [
+      {
+        "name": "All weekdays — empty result",
+        "setupSql": "CREATE TABLE events (id INTEGER, event_date TEXT);\nINSERT INTO events (id, event_date) VALUES\n  (1, '2024-06-10'),\n  (2, '2024-06-11'),\n  (3, '2024-06-12'),\n  (4, '2024-06-13'),\n  (5, '2024-06-14');"
+      },
+      {
+        "name": "Only Sundays — wday must be 0",
+        "setupSql": "CREATE TABLE events (id INTEGER, event_date TEXT);\nINSERT INTO events (id, event_date) VALUES\n  (1, '2024-06-09'),\n  (2, '2024-06-16'),\n  (3, '2024-06-23'),\n  (4, '2024-06-25'),\n  (5, '2024-06-26');"
+      },
+      {
+        "name": "IDs out of date order — exposes ORDER BY id trap",
+        "setupSql": "CREATE TABLE events (id INTEGER, event_date TEXT);\nINSERT INTO events (id, event_date) VALUES\n  (10, '2024-01-06'),\n  (3,  '2024-01-13'),\n  (7,  '2024-01-20'),\n  (1,  '2024-01-07'),\n  (5,  '2024-01-14');"
+      },
+      {
+        "name": "Single Saturday among all weekdays",
+        "setupSql": "CREATE TABLE events (id INTEGER, event_date TEXT);\nINSERT INTO events (id, event_date) VALUES\n  (1, '2024-06-17'),\n  (2, '2024-06-18'),\n  (3, '2024-06-19'),\n  (4, '2024-06-20'),\n  (5, '2024-06-21'),\n  (6, '2024-06-22');"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT id, event_date,\n       strftime('%w', event_date) AS wday\nFROM events\nWHERE strftime('%w', event_date) IN ('0', '6')\nORDER BY id;",
+      "note": "Orders by id instead of event_date; matches the example because ids happen to be in chronological order, but fails when ids are inserted out of date order."
+    }
+  },
+  "weighted-course-gpa": {
+    "tests": [
+      {
+        "name": "Repeating decimal requires ROUND",
+        "setupSql": "CREATE TABLE enrollments (student TEXT, course TEXT, credits INTEGER, grade_point REAL);\nINSERT INTO enrollments (student, course, credits, grade_point) VALUES\n  ('Fay', 'Calc',    3, 4.0),\n  ('Fay', 'Bio',     3, 3.0),\n  ('Fay', 'Chem',    3, 3.0),\n  ('Guy', 'Physics', 2, 3.5);"
+      },
+      {
+        "name": "Heavy credits flip ordering vs plain average",
+        "setupSql": "CREATE TABLE enrollments (student TEXT, course TEXT, credits INTEGER, grade_point REAL);\nINSERT INTO enrollments (student, course, credits, grade_point) VALUES\n  ('Sam', 'Core',   4, 4.0),\n  ('Sam', 'Elec',   1, 0.0),\n  ('Lee', 'Core',   1, 4.0),\n  ('Lee', 'Elec',   4, 0.0);"
+      },
+      {
+        "name": "Single-course student",
+        "setupSql": "CREATE TABLE enrollments (student TEXT, course TEXT, credits INTEGER, grade_point REAL);\nINSERT INTO enrollments (student, course, credits, grade_point) VALUES\n  ('Solo', 'Math',    3, 3.5),\n  ('Duo',  'Physics', 2, 4.0),\n  ('Duo',  'Art',     2, 2.0);"
+      },
+      {
+        "name": "GPA tie sorted by student name",
+        "setupSql": "CREATE TABLE enrollments (student TEXT, course TEXT, credits INTEGER, grade_point REAL);\nINSERT INTO enrollments (student, course, credits, grade_point) VALUES\n  ('Zara', 'Math',    2, 4.0),\n  ('Zara', 'Art',     2, 2.0),\n  ('Anna', 'Science', 2, 4.0),\n  ('Anna', 'PE',      2, 2.0),\n  ('Mark', 'History', 2, 1.0);"
+      }
+    ],
+    "trap": {
+      "sql": "SELECT student,\n       SUM(credits * grade_point) / SUM(credits) AS gpa\nFROM enrollments\nGROUP BY student\nORDER BY gpa DESC, student;",
+      "note": "Omits ROUND so the gpa column is a raw floating-point; matches the example (all results happen to be exact decimals) but diverges when the weighted average is a repeating decimal like 10/3."
+    }
+  }
+}

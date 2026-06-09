@@ -78,6 +78,7 @@ const errors = [];
 const newProblems = [];
 const solutionsBySlug = {};
 const edgeCasesBySlug = {};
+const extraApproachesBySlug = {};
 
 if (!existsSync(dataDir)) {
   console.error(`No data dir at ${dataDir}`);
@@ -154,6 +155,18 @@ for (const file of files) {
     continue;
   }
 
+  // extra-approaches.json: { slug: [ {name,sql,explanation}, ... ] }
+  // Additional worked solutions APPENDED after a problem's existing approaches
+  // in index.ts. (slug existence checked after all problems are known.)
+  if (file === "extra-approaches.json") {
+    for (const [slug, approaches] of Object.entries(parsed)) {
+      if (!Array.isArray(approaches) || approaches.length === 0 || !approaches.every(isApproach))
+        errors.push(`extra-approaches.json: '${slug}' has a missing/malformed approach`);
+      else extraApproachesBySlug[slug] = approaches;
+    }
+    continue;
+  }
+
   // *.problems.json
   if (!Array.isArray(parsed)) {
     errors.push(`${file}: expected a JSON array of problems`);
@@ -197,6 +210,10 @@ for (const p of newProblems) {
 // every edgecases entry must reference a real problem
 for (const slug of Object.keys(edgeCasesBySlug))
   if (!seen.has(slug)) errors.push(`edgecases.json: '${slug}' is not a known problem slug`);
+
+// every extra-approaches entry must reference a real problem
+for (const slug of Object.keys(extraApproachesBySlug))
+  if (!seen.has(slug)) errors.push(`extra-approaches.json: '${slug}' is not a known problem slug`);
 
 if (errors.length) {
   console.error("VALIDATION FAILED:\n" + errors.map((e) => "  - " + e).join("\n"));
@@ -246,6 +263,15 @@ writeFileSync(
     ";\n",
 );
 
+writeFileSync(
+  resolve(outDir, "extra-approaches.generated.ts"),
+  header +
+    'import type { SolutionApproach } from "../types";\n\n' +
+    "export const extraApproaches: Record<string, SolutionApproach[]> = " +
+    JSON.stringify(extraApproachesBySlug, null, 2) +
+    ";\n",
+);
+
 console.log(
-  `generated ${newProblems.length} new problems + solutions for ${Object.keys(solutionsBySlug).length} existing problems + edge cases for ${Object.keys(edgeCasesBySlug).length} problems`,
+  `generated ${newProblems.length} new problems + solutions for ${Object.keys(solutionsBySlug).length} existing problems + edge cases for ${Object.keys(edgeCasesBySlug).length} problems + extra approaches for ${Object.keys(extraApproachesBySlug).length} problems`,
 );

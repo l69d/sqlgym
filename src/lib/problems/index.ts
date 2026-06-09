@@ -8,6 +8,9 @@ import { orderingProblems } from "./ordering";
 import { extendedProblems } from "./extended.generated";
 import { existingSolutions } from "./solutions.generated";
 import { problemEdgeCases } from "./edgecases.generated";
+import { extraApproaches } from "./extra-approaches.generated";
+
+const normSql = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
 
 // The original 29 problems, kept exactly as authored, interleaved so the list
 // doesn't read as six blocks.
@@ -44,11 +47,21 @@ const original: Problem[] = [
 ];
 
 function withApproaches(p: Problem): Problem {
-  const approaches: SolutionApproach[] =
+  const base: SolutionApproach[] =
     p.approaches ??
     existingSolutions[p.slug] ??
     [{ name: "Solution", sql: p.solutionSql, explanation: "" }];
-  return { ...p, approaches };
+  // append any extra approaches, skipping ones that duplicate an existing query
+  const seen = new Set(base.map((a) => normSql(a.sql)));
+  const merged = [...base];
+  for (const a of extraApproaches[p.slug] ?? []) {
+    const k = normSql(a.sql);
+    if (!seen.has(k)) {
+      merged.push(a);
+      seen.add(k);
+    }
+  }
+  return { ...p, approaches: merged };
 }
 
 // Backfill the hidden edge cases + trap from the central edgecases map, unless
